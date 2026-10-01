@@ -1,0 +1,19 @@
+[package]
+name = "vaulti-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vaulti command line client (dev/test tool)"
+
+[[bin]]
+name = "vaulti"
+path = "src/main.rs"
+
+[dependencies]
+vaulti-core.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+rpassword = "7"
+dirs = "6"
+zeroize = "1"
