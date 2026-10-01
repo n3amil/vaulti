@@ -322,7 +322,6 @@ dialog h3 { margin-top: 20px; }
 .my-card-text { min-width: 0; }
 .my-card-text p { margin: 0 0 6px; }
 .friendly { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
-.friendly-sub { color: var(--muted); font-size: 13px; }
 .details { margin-top: 8px !important; word-break: break-all; }
 .contact-preview { background: var(--glass-soft); border: 1px solid var(--glass-edge); border-radius: var(--radius); padding: 12px 14px; margin-top: 12px; }
 .contact-preview p { margin: 8px 0 0; }

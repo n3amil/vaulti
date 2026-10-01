@@ -258,14 +258,13 @@ const de = {
   'Copy my card': 'Meine Karte kopieren',
   "People you can share collections with. The easiest way: meet up and scan each other's QR code.":
     'Personen, mit denen du Sammlungen teilen kannst. Am einfachsten: Trefft euch und scannt gegenseitig eure QR-Codes.',
-  'Others see you as': 'Andere sehen dich als',
   'Let them scan this code, or send them your card.': 'Lass diesen Code scannen oder schick deine Karte.',
   'Details': 'Details',
   'Scan their QR code': 'QR-Code der Person scannen',
   'Or paste a contact card': 'Oder Kontaktkarte einfügen',
   'Scanned in person, so this is really them.': 'Persönlich gescannt, also ist es wirklich diese Person.',
-  'Check with them that their app shows the same name under Contacts. For extra certainty, compare the fingerprint under Details.':
-    'Frag nach, ob ihre App unter Kontakte denselben Namen zeigt. Für mehr Sicherheit vergleicht den Fingerabdruck unter Details.',
+  'Received by chat or email? Scanning in person is safest. Otherwise compare this fingerprint with the one under Contacts → Details in their app.':
+    'Per Chat oder E-Mail bekommen? Persönlich scannen ist am sichersten. Sonst vergleicht diesen Fingerabdruck mit dem unter Kontakte → Details in der App der Person.',
   "That QR code isn't a Vaulti contact card": 'Dieser QR-Code ist keine Vaulti-Kontaktkarte',
   'Add a contact': 'Kontakt hinzufügen',
   'Check card': 'Karte prüfen',

@@ -2,7 +2,6 @@
 // textContent (never innerHTML) — this is a password manager.
 
 import { t, translateError, translatePage, setRich, lang, langPref, setLangPref, LANGUAGES } from './i18n.js';
-import { friendlyName } from './names.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -1076,7 +1075,7 @@ async function renderShareDialog() {
   $('[data-title]', shareDialog).textContent = t('Share "{name}"', { name: c.name });
   $('[data-members]', shareDialog).replaceChildren(
     ...c.members.map((m) => {
-      const who = person(m.is_me ? t('{name} (you)', { name: m.name }) : m.name, m.fingerprint);
+      const who = person(m.is_me ? t('{name} (you)', { name: m.name }) : m.name);
       if (m.role === 'owner') return h('li', {}, who, h('span', { class: 'muted small', text: t('Owner') }));
       const role = h('select', { onchange: (e) => share(m.user_id, e.target.value) },
         h('option', { value: 'editor', text: t('Can edit') }), h('option', { value: 'viewer', text: t('Can view') }));
@@ -1087,7 +1086,7 @@ async function renderShareDialog() {
   const members = new Set(c.members.map((m) => m.user_id));
   const contacts = await invoke('contacts');
   const candidates = contacts.filter((x) => !members.has(x.user_id));
-  shareAdd.elements.contact.replaceChildren(...candidates.map((x) => h('option', { value: x.user_id, text: `${x.name} · ${friendlyName(x.fingerprint)}` })));
+  shareAdd.elements.contact.replaceChildren(...candidates.map((x) => h('option', { value: x.user_id, text: x.name })));
   $('[data-has-contacts]', shareDialog).hidden = candidates.length === 0;
   $('[data-no-contacts]', shareDialog).hidden = candidates.length > 0;
   setRich(
@@ -1252,14 +1251,9 @@ const contactForm = $('[data-add-contact]', contactsDialog);
 let myCard = '';
 let scannedCard = false;
 
-// A person as shown in lists: avatar, chosen name, friendly key name underneath.
-function person(name, fingerprint, ...extra) {
-  return h(
-    'div',
-    { class: 'who person' },
-    avatar(name),
-    h('div', {}, h('div', { text: name }), h('div', { class: 'sub', text: friendlyName(fingerprint) }), ...extra),
-  );
+// A person as shown in lists: avatar and name.
+function person(name) {
+  return h('div', { class: 'who person' }, avatar(name), h('div', { text: name }));
 }
 
 function resetContactForm() {
@@ -1274,7 +1268,7 @@ async function renderContacts() {
   const me = await invoke('profile');
   myCard = me.card;
   $('[data-my-fp]', contactsDialog).textContent = me.fingerprint;
-  $('[data-my-friendly]', contactsDialog).textContent = friendlyName(me.fingerprint);
+  $('[data-my-name]', contactsDialog).textContent = me.name;
   const qr = $('[data-my-qr]', contactsDialog);
   qr.hidden = !me.card_qr;
   if (me.card_qr) qr.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(me.card_qr);
@@ -1284,7 +1278,7 @@ async function renderContacts() {
       h(
         'li',
         {},
-        person(c.name, c.fingerprint),
+        person(c.name),
         h('button', {
           class: 'danger',
           text: t('Remove'),
@@ -1320,11 +1314,11 @@ contactForm.elements.card.addEventListener('input', () => {
 async function previewCard(card) {
   const c = await invoke('preview_contact', { card });
   $('[data-name]', contactForm).textContent = c.name;
-  $('[data-friendly]', contactForm).textContent = friendlyName(c.fingerprint);
   $('[data-avatar]', contactForm).replaceChildren(avatar(c.name));
   $('[data-fp]', contactForm).textContent = c.fingerprint;
   $('[data-check-scanned]', contactForm).hidden = !scannedCard;
   $('[data-check-pasted]', contactForm).hidden = scannedCard;
+  $('[data-check-pasted-fp]', contactForm).hidden = scannedCard;
   $('[data-preview]', contactForm).hidden = false;
   $('[data-submit]', contactForm).textContent = t('Add contact');
 }

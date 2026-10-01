@@ -331,8 +331,7 @@
       <div class="my-card">
         <img data-my-qr alt="" class="qr">
         <div class="my-card-text">
-          <p class="muted small" data-i18n="Others see you as">Others see you as</p>
-          <p class="friendly" data-my-friendly></p>
+          <p class="friendly" data-my-name></p>
           <p class="muted small" data-i18n="Let them scan this code, or send them your card.">Let them scan this code, or send them your card.</p>
           <span class="row">
             <button data-action="copy-card" data-i18n="Copy my card">Copy my card</button>
@@ -348,10 +347,10 @@
           <textarea name="card" rows="3" class="mono" spellcheck="false" placeholder="vaulti-contact:…"></textarea>
         </label>
         <div class="contact-preview" data-preview hidden>
-          <div class="person"><span data-avatar></span><div><b data-name></b><div class="friendly-sub" data-friendly></div></div></div>
+          <div class="person"><span data-avatar></span><div><b data-name></b></div></div>
           <p class="muted small" data-check-scanned hidden data-i18n="Scanned in person, so this is really them.">Scanned in person, so this is really them.</p>
-          <p class="muted small" data-check-pasted data-i18n="Check with them that their app shows the same name under Contacts. For extra certainty, compare the fingerprint under Details.">Check with them that their app shows the same name under Contacts. For extra certainty, compare the fingerprint under Details.</p>
-          <p class="muted small details"><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-fp></span></p>
+          <p class="muted small" data-check-pasted data-i18n="Received by chat or email? Scanning in person is safest. Otherwise compare this fingerprint with the one under Contacts → Details in their app.">Received by chat or email? Scanning in person is safest. Otherwise compare this fingerprint with the one under Contacts → Details in their app.</p>
+          <p class="muted small details" data-check-pasted-fp><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-fp></span></p>
         </div>
         <p class="error" data-error></p>
         <span class="row"><button type="submit" class="primary" data-submit data-i18n="Check card">Check card</button></span>
