@@ -23,9 +23,13 @@ impl Dev {
     }
 
     async fn from_vault(v: Vault) -> Dev {
+        Self::from_vault_with(v, true).await
+    }
+
+    async fn from_vault_with(v: Vault, sync2: bool) -> Dev {
         let dir = tempfile::tempdir().unwrap();
         let shared = SharedVault::new(v, dir.path().join("vault.json"));
-        let node = SyncNode::spawn(shared.clone(), N).await.unwrap();
+        let node = SyncNode::spawn_with(shared.clone(), N, sync2).await.unwrap();
         Dev { node, shared, _dir: dir }
     }
 
@@ -100,6 +104,14 @@ async fn pair_then_sync_both_ways() {
     assert!(results.iter().all(|(_, r)| r.is_ok()), "{results:?}");
     assert_eq!(phone.titles(), ["from laptop", "from phone", "later"]);
 
+    // Nothing changed since: the sync/2 hashes match and nothing is applied.
+    let again = phone.node.sync_with(&laptop.node.node_id()).await.unwrap();
+    assert!(!again.changed, "{again:?}");
+    assert_eq!(
+        laptop.v(|v| v.sync_digests(&vaulti_core::Peer::OwnDevice).unwrap()),
+        phone.v(|v| v.sync_digests(&vaulti_core::Peer::OwnDevice).unwrap())
+    );
+
     // Saved to disk on the receiving side.
     let reloaded = Vault::unlock(store::load(&phone.shared.path).unwrap(), "password").unwrap();
     assert_eq!(reloaded.entries().count(), 3);
@@ -172,4 +184,26 @@ async fn share_between_users_and_refuse_strangers() {
     // Alice doesn't know Mallory: Mallory's connection is refused.
     assert!(mallory.node.sync_with(&alice.node.node_id()).await.is_err());
     assert_eq!(mallory.titles(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn falls_back_to_sync1_for_older_peers() {
+    let laptop = Dev::new("Me").await;
+    let pid = laptop.v(|v| v.collections().next().unwrap().id);
+    let ticket = laptop.node.start_pairing().await.unwrap();
+    let secret = new_device_secret().unwrap();
+    let confirm = auto_confirm(&laptop, true);
+    let (file, _) = join_capturing_code(&ticket, secret).await;
+    confirm.await.unwrap();
+    let old = Vault::unlock_new_device(file.unwrap(), "password", secret, "old phone").unwrap();
+    let old_phone = Dev::from_vault_with(old, false).await;
+    laptop.introduce(&old_phone).await;
+
+    laptop.v(|v| v.add_entry(pid, entry("to old app")).unwrap());
+    laptop.node.sync_with(&old_phone.node.node_id()).await.unwrap();
+    assert_eq!(old_phone.titles(), ["to old app"]);
+
+    old_phone.v(|v| v.add_entry(pid, entry("from old app")).unwrap());
+    old_phone.node.sync_with(&laptop.node.node_id()).await.unwrap();
+    assert_eq!(laptop.titles(), ["from old app", "to old app"]);
 }

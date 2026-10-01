@@ -566,3 +566,29 @@ fn delete_forever_drops_history_everywhere() {
     let json = String::from_utf8(serde_json::to_vec(&laptop.export_backup()).unwrap()).unwrap();
     assert!(!json.contains("v1"));
 }
+
+#[test]
+fn digests_match_after_sync_and_flag_only_changed_collections() {
+    let (mut laptop, _) = Vault::create("pw", kdf()).unwrap();
+    let pid = personal(&laptop);
+    let work = laptop.create_collection("Work").unwrap();
+    laptop.add_entry(pid, sample("a")).unwrap();
+    let mut phone = pair(&mut laptop, "pw");
+    sync(&mut laptop, &mut phone);
+    let peer = Peer::OwnDevice;
+    let on_phone = phone.sync_digests(&peer).unwrap();
+    assert_eq!(laptop.sync_digests(&peer).unwrap(), on_phone);
+    assert!(laptop.differing(&peer, &on_phone).unwrap().is_empty());
+
+    laptop.add_entry(work, sample("b")).unwrap();
+    assert_eq!(laptop.differing(&peer, &on_phone).unwrap(), [work]);
+    let only = laptop.sync_message_with(&peer, &[work]).unwrap();
+    assert_eq!(only.collections.len(), 1);
+    phone.apply_sync(&peer, only).unwrap();
+    assert!(laptop.differing(&peer, &phone.sync_digests(&peer).unwrap()).unwrap().is_empty());
+
+    // A collection only one side has is flagged too.
+    let mut theirs = phone.sync_digests(&peer).unwrap();
+    theirs.insert(Uuid::new_v4(), "x".into());
+    assert_eq!(laptop.differing(&peer, &theirs).unwrap().len(), 1);
+}

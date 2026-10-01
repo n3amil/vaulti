@@ -6297,6 +6297,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
  "vaulti-core",
 ]
 

@@ -7,16 +7,22 @@
 //!   from the secret and both device keys; only after the user confirms on
 //!   the existing device does it send a copy of the (still encrypted) vault
 //!   file. The user then unlocks it with the master password on the new device.
-//! - `vaulti/sync/1`: one request/response exchange of [`SyncMessage`]s. The
-//!   dialer sends its state, the acceptor merges and replies with its merged
-//!   state, the dialer merges. Only our own devices and contacts' devices
-//!   are accepted; everything else is refused before any data is read.
+//! - `vaulti/sync/2`: three messages. The dialer sends a hash per collection;
+//!   the acceptor replies with only the collections that differ (plus the
+//!   small account state) and asks for the same ones back; the dialer merges
+//!   and sends its merged copies of those. When nothing changed, a sync costs
+//!   a few hundred bytes instead of the whole vault.
+//! - `vaulti/sync/1`: the older single exchange of full [`SyncMessage`]s. Still
+//!   accepted, and used when a peer runs an app version without `sync/2`.
+//!
+//! Only our own devices and contacts' devices are accepted; everything else
+//! is refused before any data is read.
 //!
 //! Peers are found via n0's DNS address lookup (+ relay fallback), mDNS on
 //! the local network, and addresses learned from pairing tickets. Relays only
 //! ever see QUIC-encrypted traffic, and vault data is additionally encrypted.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -32,9 +38,24 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, oneshot};
+use uuid::Uuid;
 use vaulti_core::{store, FileV2, Peer, SyncMessage, SyncReport, Vault};
 
 pub const SYNC_ALPN: &[u8] = b"vaulti/sync/1";
+pub const SYNC2_ALPN: &[u8] = b"vaulti/sync/2";
+
+/// `sync/2` step 1, dialer → acceptor.
+#[derive(Serialize, Deserialize)]
+struct Hello {
+    digests: BTreeMap<Uuid, String>,
+}
+
+/// `sync/2` step 2, acceptor → dialer. Step 3 is a plain [`SyncMessage`].
+#[derive(Serialize, Deserialize)]
+struct Reply {
+    msg: SyncMessage,
+    want: Vec<Uuid>,
+}
 pub const PAIR_ALPN: &[u8] = b"vaulti/pair/1";
 const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -233,6 +254,26 @@ async fn send_json<T: Serialize>(send: &mut iroh::endpoint::SendStream, value: &
     Ok(())
 }
 
+/// One length-prefixed JSON message, for streams that carry several.
+async fn send_frame<T: Serialize>(send: &mut iroh::endpoint::SendStream, value: &T) -> Result<()> {
+    let bytes = serde_json::to_vec(value)?;
+    send.write_all(&u32::try_from(bytes.len())?.to_be_bytes()).await?;
+    send.write_all(&bytes).await?;
+    Ok(())
+}
+
+async fn recv_frame<T: for<'de> Deserialize<'de>>(recv: &mut iroh::endpoint::RecvStream) -> Result<T> {
+    let mut len = [0u8; 4];
+    recv.read_exact(&mut len).await?;
+    let len = u32::from_be_bytes(len) as usize;
+    if len > MAX_MESSAGE {
+        bail!("sync message too large");
+    }
+    let mut buf = vec![0u8; len];
+    recv.read_exact(&mut buf).await?;
+    Ok(serde_json::from_slice(&buf)?)
+}
+
 async fn recv_json<T: for<'de> Deserialize<'de>>(recv: &mut iroh::endpoint::RecvStream, limit: usize) -> Result<T> {
     let bytes = recv.read_to_end(limit).await?;
     Ok(serde_json::from_slice(&bytes)?)
@@ -245,16 +286,22 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 impl SyncNode {
     /// Starts the endpoint with the vault's device key and accepts connections.
     pub async fn spawn(shared: SharedVault, network: Network) -> Result<Arc<Self>> {
+        Self::spawn_with(shared, network, true).await
+    }
+
+    /// `sync2: false` behaves like an app version from before `sync/2` (tests).
+    async fn spawn_with(shared: SharedVault, network: Network, sync2: bool) -> Result<Arc<Self>> {
         let secret = shared.with(|v| Ok(v.device_secret()))?;
         let (endpoint, memory) = bind(secret, network).await?;
         let (events, _) = broadcast::channel(64);
         let inner =
             Arc::new(Inner { shared, offer: Mutex::new(None), confirmations: Mutex::new(HashMap::new()), events });
         let host = endpoint.id();
-        let router = Router::builder(endpoint)
-            .accept(SYNC_ALPN, SyncHandler(inner.clone()))
-            .accept(PAIR_ALPN, PairHandler { inner: inner.clone(), host })
-            .spawn();
+        let mut router = Router::builder(endpoint).accept(SYNC_ALPN, SyncHandler(inner.clone()));
+        if sync2 {
+            router = router.accept(SYNC2_ALPN, Sync2Handler(inner.clone()));
+        }
+        let router = router.accept(PAIR_ALPN, PairHandler { inner: inner.clone(), host }).spawn();
         Ok(Arc::new(Self { router, memory, network, inner }))
     }
 
@@ -321,13 +368,42 @@ impl SyncNode {
             .shared
             .with(|v| v.classify_peer(node_id).ok_or_else(|| anyhow!("{node_id} is not a known device")))?;
         let id = parse_node_id(node_id)?;
-        let conn = tokio::time::timeout(CONNECT_TIMEOUT, self.endpoint().connect(id, SYNC_ALPN))
-            .await
-            .map_err(|_| anyhow!("timed out connecting"))??;
-        let result = tokio::time::timeout(EXCHANGE_TIMEOUT, self.exchange(&conn, &peer)).await;
-        conn.close(0u32.into(), b"done");
-        let report = result.map_err(|_| anyhow!("sync timed out"))??;
+        let report = match self.connect(id, SYNC2_ALPN).await {
+            Ok(conn) => {
+                let result = tokio::time::timeout(EXCHANGE_TIMEOUT, self.exchange2(&conn, &peer)).await;
+                conn.close(0u32.into(), b"done");
+                result.map_err(|_| anyhow!("sync timed out"))??
+            }
+            // Reachable but refused sync/2: an older app version. Fall back to
+            // the full exchange. (A timeout means offline; don't wait twice.)
+            Err(e) if !is_timeout(&e) => {
+                let conn = self.connect(id, SYNC_ALPN).await?;
+                let result = tokio::time::timeout(EXCHANGE_TIMEOUT, self.exchange(&conn, &peer)).await;
+                conn.close(0u32.into(), b"done");
+                result.map_err(|_| anyhow!("sync timed out"))??
+            }
+            Err(e) => return Err(e),
+        };
         let _ = self.inner.events.send(Event::Synced { node_id: node_id.to_string(), peer, report });
+        Ok(report)
+    }
+
+    async fn connect(&self, id: EndpointId, alpn: &[u8]) -> Result<Connection> {
+        Ok(tokio::time::timeout(CONNECT_TIMEOUT, self.endpoint().connect(id, alpn))
+            .await
+            .map_err(|_| anyhow!(CONNECT_TIMED_OUT))??)
+    }
+
+    async fn exchange2(&self, conn: &Connection, peer: &Peer) -> Result<SyncReport> {
+        let digests = self.inner.shared.with(|v| Ok(v.sync_digests(peer)?))?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send_frame(&mut send, &Hello { digests }).await?;
+        let reply: Reply = recv_frame(&mut recv).await?;
+        let report = self.inner.apply(peer, reply.msg)?;
+        let back = self.inner.shared.with(|v| Ok(v.sync_message_with(peer, &reply.want)?))?;
+        send_frame(&mut send, &back).await?;
+        send.finish()?;
+        let _ = recv.read_to_end(16).await; // acceptor closes its side when done
         Ok(report)
     }
 
@@ -382,6 +458,50 @@ impl Inner {
 
 fn user_err(e: anyhow::Error) -> AcceptError {
     AcceptError::from_boxed(e.into())
+}
+
+const CONNECT_TIMED_OUT: &str = "timed out connecting";
+
+fn is_timeout(e: &anyhow::Error) -> bool {
+    e.to_string() == CONNECT_TIMED_OUT
+}
+
+#[derive(Clone)]
+struct Sync2Handler(Arc<Inner>);
+
+impl std::fmt::Debug for Sync2Handler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Sync2Handler")
+    }
+}
+
+impl ProtocolHandler for Sync2Handler {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        let node_id = node_id_hex(&conn.remote_id());
+        let Some(peer) = self.0.shared.with(|v| Ok(v.classify_peer(&node_id))).ok().flatten() else {
+            conn.close(1u32.into(), b"unknown peer");
+            return Ok(());
+        };
+        let (mut send, mut recv) = conn.accept_bi().await?;
+        let hello: Hello = recv_frame(&mut recv).await.map_err(user_err)?;
+        let reply = self
+            .0
+            .shared
+            .with(|v| {
+                let want = v.differing(&peer, &hello.digests)?;
+                Ok(Reply { msg: v.sync_message_with(&peer, &want)?, want })
+            })
+            .map_err(user_err)?;
+        send_frame(&mut send, &reply).await.map_err(user_err)?;
+        // Step 3: the dialer's merged copies of what we asked for, plus its
+        // account state (always small, merges are idempotent).
+        let msg: SyncMessage = recv_frame(&mut recv).await.map_err(user_err)?;
+        let report = self.0.apply(&peer, msg).map_err(user_err)?;
+        send.finish().map_err(|e| user_err(e.into()))?;
+        let _ = self.0.events.send(Event::Synced { node_id, peer, report });
+        conn.closed().await;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]

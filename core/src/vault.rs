@@ -12,7 +12,11 @@
 //! are wrapped per member, so sharing a collection = adding a KeyWrap and a
 //! member to the owner-signed meta.
 
+use std::collections::BTreeMap;
+
+use data_encoding::HEXLOWER;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -933,15 +937,51 @@ impl Vault {
     }
 
     pub fn sync_message(&self, peer: &Peer) -> Result<SyncMessage> {
-        let collections = self
-            .collections
-            .iter()
-            .filter(|c| match peer {
-                Peer::OwnDevice => true,
-                Peer::Contact(uid) => c.doc.meta.meta.member(uid).is_some(),
+        self.sync_message_for(peer, |_| true)
+    }
+
+    /// Collections this peer may receive.
+    fn shared_with<'a>(&'a self, peer: &'a Peer) -> impl Iterator<Item = &'a OpenCollection> {
+        self.collections.iter().filter(move |c| match peer {
+            Peer::OwnDevice => true,
+            Peer::Contact(uid) => c.doc.meta.meta.member(uid).is_some(),
+        })
+    }
+
+    /// Hash of each collection we share with `peer`, so both sides can tell
+    /// which collections differ without sending them. Converged documents
+    /// serialize identically (sorted maps, sorted history), so equal state
+    /// means equal hashes.
+    pub fn sync_digests(&self, peer: &Peer) -> Result<BTreeMap<Uuid, String>> {
+        self.shared_with(peer)
+            .map(|c| {
+                let mut h = Sha256::new();
+                h.update(serde_json::to_vec(&c.doc)?);
+                for k in &c.keys {
+                    h.update(k.recipient.0.as_bytes());
+                }
+                Ok((c.view.id, HEXLOWER.encode(&h.finalize())))
             })
-            .map(|c| self.record(c))
-            .collect::<Result<_>>()?;
+            .collect()
+    }
+
+    /// Collections whose hash differs from `theirs`, or that only one side
+    /// has. These are the only ones worth sending, in both directions.
+    pub fn differing(&self, peer: &Peer, theirs: &BTreeMap<Uuid, String>) -> Result<Vec<Uuid>> {
+        let mine = self.sync_digests(peer)?;
+        let mut out: Vec<Uuid> = mine.iter().filter(|(id, d)| theirs.get(*id) != Some(*d)).map(|(id, _)| *id).collect();
+        out.extend(theirs.keys().filter(|id| !mine.contains_key(*id)));
+        Ok(out)
+    }
+
+    /// Like [`Self::sync_message`], but only with the given collections.
+    pub fn sync_message_with(&self, peer: &Peer, ids: &[Uuid]) -> Result<SyncMessage> {
+        self.sync_message_for(peer, |id| ids.contains(&id))
+    }
+
+    fn sync_message_for(&self, peer: &Peer, include: impl Fn(Uuid) -> bool) -> Result<SyncMessage> {
+        let collections =
+            self.shared_with(peer).filter(|c| include(c.view.id)).map(|c| self.record(c)).collect::<Result<_>>()?;
         let own = match peer {
             Peer::OwnDevice => Some(OwnState { slots: self.slots.clone(), account: self.seal_account()? }),
             Peer::Contact(_) => None,

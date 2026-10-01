@@ -52,6 +52,9 @@ collection key ─seals─▶ collection doc: owner-signed meta (name, members, 
 - **Transport:** iroh (QUIC, ed25519 endpoint ids, hole punching). Peers found via n0's DNS lookup,
   mDNS on the LAN, relays as fallback. Relays only see encrypted QUIC; vault data is encrypted again.
 - **Who can connect:** only your own devices and your contacts' devices; anyone else is refused before data is read.
+- **Sync protocol (`vaulti/sync/2`):** devices first exchange a hash per collection and then send only the
+  collections that differ, so a sync with no changes is ~3 KB instead of the whole vault. Falls back to
+  `vaulti/sync/1` (full exchange) for older app versions.
 - **Merge:** state-based CRDT. Per entry, the newest version (hybrid logical clock) with a valid
   signature from a current editor/owner wins; older versions (also the losing side of a concurrent edit)
   go to the entry's history, which merges as a union capped at 10. Trashing is a normal version with
