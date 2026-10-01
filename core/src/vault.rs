@@ -4,35 +4,67 @@
 //! ```text
 //! root key (random) ──wrapped by── Argon2id(master password)  [password slot]
 //!                   └─wrapped by── Argon2id(backup code)      [recovery slot]
-//! root key ─wraps─▶ identity secret keys (ed25519 + x25519, for sharing later)
-//! root key ─wraps─▶ collection key ─encrypts─▶ collection data
+//! root key ─seals─▶ identity secret (ed25519 + x25519), account doc, device key
+//! identity (x25519) ─opens─▶ collection key (one KeyWrap per member)
+//! collection key ─seals─▶ collection doc (meta + signed entries)
 //! ```
-//! Changing the password or rotating the backup code only rewraps the root
-//! key; nothing else is re-encrypted.
+//! All devices of a user share the root key and identity. Collection keys
+//! are wrapped per member, so sharing a collection = adding a KeyWrap and a
+//! member to the owner-signed meta.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::crypto::{self, derive_key, open, random_salt, seal, KdfParams, Key, Sealed, KEY_LEN};
+use crate::account::{AccountDoc, Contact, ContactCard, Device, Lww};
+use crate::collection::{
+    aad_body, aad_key, sign_entry, sign_meta, CollectionDoc, CollectionRecord, EntryData, EntryVersion, KeyWrap,
+    Member, Meta, Role,
+};
+use crate::crypto::{derive_key, fill_random, open, random_salt, seal, KdfParams, Key, Sealed};
 use crate::error::{Error, Result};
-use crate::model::{now, Collection, Entry, EntryInput};
+use crate::identity::{device_node_id, Identity, IdentityPublic, UserId};
+use crate::legacy::{self, FileV1};
+use crate::model::{now, Collection, DeviceView, Entry, EntryInput};
 use crate::recovery::BackupCode;
+use crate::stamp::{Clock, Stamp};
 
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 pub const DEFAULT_COLLECTION: &str = "Personal";
+const DEFAULT_PROFILE_NAME: &str = "Me";
+const DEFAULT_DEVICE_NAME: &str = "This device";
 
-/// What is written to disk. Everything secret is inside a `Sealed`.
+/// On-disk vault. Accepts the legacy v1 format on load.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VaultFile {
+#[serde(untagged)]
+pub enum VaultFile {
+    Current(Box<FileV2>),
+    Legacy(Box<FileV1>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileV2 {
     pub format: u32,
+    /// Same on all of a user's devices.
     pub vault_id: Uuid,
-    pub kdf: KdfParams,
-    pub password_slot: KeySlot,
-    pub recovery_slot: KeySlot,
+    pub slots: Slots,
     pub identity_public: IdentityPublic,
     pub identity_secret: Sealed,
+    /// `AccountDoc`, sealed with the root key.
+    pub account: Sealed,
     pub collections: Vec<CollectionRecord>,
+    /// Absent in a copy sent to a newly paired device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<DeviceLocal>,
+}
+
+/// Key slots, synced between own devices (one master password, one backup code).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Slots {
+    pub kdf: KdfParams,
+    pub password: KeySlot,
+    pub recovery: KeySlot,
+    pub stamp: Stamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,127 +74,159 @@ pub struct KeySlot {
     pub wrapped_root: Sealed,
 }
 
-/// Public half of the user's identity. Will be shared with other users so
-/// they can wrap collection keys for us.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IdentityPublic {
-    #[serde(with = "crate::b64")]
-    pub signing: Vec<u8>,
-    #[serde(with = "crate::b64")]
-    pub encryption: Vec<u8>,
+/// Never leaves the device.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceLocal {
+    pub device_id: Uuid,
+    /// iroh endpoint secret key, sealed with the root key.
+    pub device_secret: Sealed,
+    pub clock: Clock,
+}
+
+/// Who is on the other end of a sync connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Peer {
+    OwnDevice,
+    Contact(UserId),
+}
+
+/// Sent to a peer during sync. State-based: each side sends everything the
+/// peer may see, the receiver merges.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncMessage {
+    pub card: ContactCard,
+    /// Only between own devices.
+    pub own: Option<OwnState>,
+    pub collections: Vec<CollectionRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CollectionRecord {
-    pub id: Uuid,
-    pub wrapped_key: Sealed,
-    pub data: Sealed,
+pub struct OwnState {
+    pub slots: Slots,
+    pub account: Sealed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CollectionData {
-    name: String,
-    entries: Vec<Entry>,
-    updated_at: u64,
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SyncReport {
+    pub changed: bool,
+    pub new_collections: usize,
+    pub entries_updated: usize,
+    pub rejected: usize,
 }
 
 struct OpenCollection {
+    owner: IdentityPublic,
+    keys: Vec<KeyWrap>,
     key: Key,
-    wrapped_key: Sealed,
-    inner: Collection,
+    doc: CollectionDoc,
+    view: Collection,
 }
 
 /// An unlocked vault. Holds the root key in memory until dropped.
 pub struct Vault {
     vault_id: Uuid,
-    kdf: KdfParams,
-    password_slot: KeySlot,
-    recovery_slot: KeySlot,
+    slots: Slots,
+    identity: Identity,
     identity_public: IdentityPublic,
     identity_secret: Sealed,
     root: Key,
+    account: AccountDoc,
     collections: Vec<OpenCollection>,
+    device_id: Uuid,
+    device_secret: Zeroizing<[u8; 32]>,
+    clock: Clock,
 }
 
+// Slot/identity labels kept from v1 so migrated slots stay valid.
 fn aad(vault_id: &Uuid, purpose: &str) -> Vec<u8> {
-    format!("vaulti/v{FORMAT_VERSION}/{vault_id}/{purpose}").into_bytes()
+    format!("vaulti/v1/{vault_id}/{purpose}").into_bytes()
 }
 
 const AAD_PASSWORD: &str = "slot/password";
 const AAD_RECOVERY: &str = "slot/recovery";
 const AAD_IDENTITY: &str = "identity";
+const AAD_ACCOUNT: &str = "account";
 
-fn aad_ckey(vault_id: &Uuid, cid: &Uuid) -> Vec<u8> {
-    aad(vault_id, &format!("collection/{cid}/key"))
-}
-
-fn aad_cdata(vault_id: &Uuid, cid: &Uuid) -> Vec<u8> {
-    aad(vault_id, &format!("collection/{cid}/data"))
+fn aad_device(vault_id: &Uuid, device_id: &Uuid) -> Vec<u8> {
+    aad(vault_id, &format!("device/{device_id}"))
 }
 
 fn make_slot(secret: &[u8], root: &Key, kdf: &KdfParams, aad: &[u8]) -> Result<KeySlot> {
     let salt = random_salt()?;
     let kek = derive_key(secret, &salt, kdf)?;
-    let wrapped_root = seal(&kek, root.as_bytes(), aad)?;
-    Ok(KeySlot { salt, wrapped_root })
+    Ok(KeySlot { salt, wrapped_root: seal(&kek, root.as_bytes(), aad)? })
 }
 
 fn open_slot(secret: &[u8], slot: &KeySlot, kdf: &KdfParams, aad: &[u8]) -> Result<Key> {
     let kek = derive_key(secret, &slot.salt, kdf)?;
-    let raw = open(&kek, &slot.wrapped_root, aad)?;
-    Key::from_bytes(&raw)
+    Key::from_bytes(&open(&kek, &slot.wrapped_root, aad)?)
+}
+
+fn random_device_secret() -> Result<Zeroizing<[u8; 32]>> {
+    let mut s = Zeroizing::new([0u8; 32]);
+    fill_random(s.as_mut())?;
+    Ok(s)
+}
+
+enum SlotKind {
+    Password,
+    Recovery,
+}
+
+/// Device-specific setup when opening a vault copied from another device.
+struct NewDevice {
+    secret: Zeroizing<[u8; 32]>,
+    name: String,
 }
 
 impl Vault {
+    // --- lifecycle -----------------------------------------------------------
+
     /// Creates a new vault. The returned backup code must be shown to the
     /// user exactly once; it is not stored anywhere.
     pub fn create(password: &str, kdf: KdfParams) -> Result<(Self, BackupCode)> {
         let vault_id = Uuid::new_v4();
+        let device_id = Uuid::new_v4();
+        let mut clock = Clock::new(device_id);
         let root = Key::random()?;
         let code = BackupCode::generate()?;
-
-        let password_slot = make_slot(password.as_bytes(), &root, &kdf, &aad(&vault_id, AAD_PASSWORD))?;
-        let recovery_slot = make_slot(code.as_bytes(), &root, &kdf, &aad(&vault_id, AAD_RECOVERY))?;
-
-        // Identity keys: 32 random bytes each for ed25519 (signing) and
-        // x25519 (key agreement), stored as signing || encryption.
-        let mut secret = Zeroizing::new([0u8; 2 * KEY_LEN]);
-        crypto::fill_random(secret.as_mut())?;
-        let sk_sign: [u8; KEY_LEN] = secret[..KEY_LEN].try_into().expect("len");
-        let sk_enc: [u8; KEY_LEN] = secret[KEY_LEN..].try_into().expect("len");
-        let identity_public = IdentityPublic {
-            signing: ed25519_dalek::SigningKey::from_bytes(&sk_sign).verifying_key().to_bytes().to_vec(),
-            encryption: x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(sk_enc)).to_bytes().to_vec(),
+        let slots = Slots {
+            kdf,
+            password: make_slot(password.as_bytes(), &root, &kdf, &aad(&vault_id, AAD_PASSWORD))?,
+            recovery: make_slot(code.as_bytes(), &root, &kdf, &aad(&vault_id, AAD_RECOVERY))?,
+            stamp: clock.tick(),
         };
-        let identity_secret = seal(&root, secret.as_ref(), &aad(&vault_id, AAD_IDENTITY))?;
+        let identity = Identity::generate()?;
+        let identity_secret = seal(&root, &identity.secret_bytes(), &aad(&vault_id, AAD_IDENTITY))?;
+        let account = AccountDoc::new(DEFAULT_PROFILE_NAME.into(), clock.tick());
 
         let mut vault = Self {
             vault_id,
-            kdf,
-            password_slot,
-            recovery_slot,
-            identity_public,
+            slots,
+            identity_public: identity.public(),
+            identity,
             identity_secret,
             root,
+            account,
             collections: Vec::new(),
+            device_id,
+            device_secret: random_device_secret()?,
+            clock,
         };
+        vault.register_this_device(DEFAULT_DEVICE_NAME);
         vault.create_collection(DEFAULT_COLLECTION)?;
         Ok((vault, code))
     }
 
     pub fn unlock(file: VaultFile, password: &str) -> Result<Self> {
-        check_format(&file)?;
-        let root = open_slot(password.as_bytes(), &file.password_slot, &file.kdf, &aad(&file.vault_id, AAD_PASSWORD))?;
-        Self::from_file(file, root)
+        Self::open_any(file, password.as_bytes(), SlotKind::Password, None)
     }
 
-    /// Unlocks with the backup code only. Callers should follow up with
+    /// Unlocks with the backup code only. Follow up with
     /// [`change_password`](Self::change_password) and
     /// [`rotate_backup_code`](Self::rotate_backup_code); [`recover`](Self::recover) does all three.
     pub fn unlock_with_backup_code(file: VaultFile, code: &BackupCode) -> Result<Self> {
-        check_format(&file)?;
-        let root = open_slot(code.as_bytes(), &file.recovery_slot, &file.kdf, &aad(&file.vault_id, AAD_RECOVERY))?;
-        Self::from_file(file, root)
+        Self::open_any(file, code.as_bytes(), SlotKind::Recovery, None)
     }
 
     /// Unlocks with the backup code, sets a new master password and issues a
@@ -174,73 +238,189 @@ impl Vault {
         Ok((vault, new_code))
     }
 
-    fn from_file(file: VaultFile, root: Key) -> Result<Self> {
-        // Verify the identity blob decrypts: catches a corrupted vault early.
-        open(&root, &file.identity_secret, &aad(&file.vault_id, AAD_IDENTITY))?;
+    /// Opens a vault received from another of the user's devices during
+    /// pairing. `device_secret` is the iroh key this device paired with.
+    pub fn unlock_new_device(file: FileV2, password: &str, device_secret: [u8; 32], device_name: &str) -> Result<Self> {
+        let new = NewDevice { secret: Zeroizing::new(device_secret), name: device_name.to_string() };
+        Self::open_any(VaultFile::Current(Box::new(file)), password.as_bytes(), SlotKind::Password, Some(new))
+    }
 
-        let mut collections = Vec::with_capacity(file.collections.len());
-        for rec in file.collections {
-            let key = Key::from_bytes(&open(&root, &rec.wrapped_key, &aad_ckey(&file.vault_id, &rec.id))?)?;
-            let plain = open(&key, &rec.data, &aad_cdata(&file.vault_id, &rec.id))?;
-            let data: CollectionData = serde_json::from_slice(&plain)?;
-            collections.push(OpenCollection {
-                key,
-                wrapped_key: rec.wrapped_key,
-                inner: Collection { id: rec.id, name: data.name, entries: data.entries, updated_at: data.updated_at },
-            });
+    fn open_any(file: VaultFile, secret: &[u8], kind: SlotKind, new: Option<NewDevice>) -> Result<Self> {
+        match file {
+            VaultFile::Current(f) => {
+                if f.format != FORMAT_VERSION {
+                    return Err(Error::UnsupportedFormat(f.format));
+                }
+                let (slot, label) = match kind {
+                    SlotKind::Password => (&f.slots.password, AAD_PASSWORD),
+                    SlotKind::Recovery => (&f.slots.recovery, AAD_RECOVERY),
+                };
+                let root = open_slot(secret, slot, &f.slots.kdf, &aad(&f.vault_id, label))?;
+                Self::from_v2(*f, root, new)
+            }
+            VaultFile::Legacy(f) => {
+                if f.format != 1 {
+                    return Err(Error::UnsupportedFormat(f.format));
+                }
+                let (slot, label) = match kind {
+                    SlotKind::Password => (&f.password_slot, AAD_PASSWORD),
+                    SlotKind::Recovery => (&f.recovery_slot, AAD_RECOVERY),
+                };
+                let root = open_slot(secret, slot, &f.kdf, &aad(&f.vault_id, label))?;
+                Self::migrate_v1(*f, root)
+            }
         }
-        Ok(Self {
-            vault_id: file.vault_id,
-            kdf: file.kdf,
-            password_slot: file.password_slot,
-            recovery_slot: file.recovery_slot,
-            identity_public: file.identity_public,
-            identity_secret: file.identity_secret,
+    }
+
+    fn from_v2(f: FileV2, root: Key, new: Option<NewDevice>) -> Result<Self> {
+        let identity = Identity::from_secret_bytes(&open(&root, &f.identity_secret, &aad(&f.vault_id, AAD_IDENTITY))?)?;
+        if identity.public() != f.identity_public {
+            return Err(Error::Malformed("identity mismatch".into()));
+        }
+        let account: AccountDoc = serde_json::from_slice(&open(&root, &f.account, &aad(&f.vault_id, AAD_ACCOUNT))?)?;
+
+        let (device_id, device_secret, clock, new_name) = match (f.local, new) {
+            (_, Some(n)) => {
+                let id = Uuid::new_v4();
+                (id, n.secret, Clock::new(id), Some(n.name))
+            }
+            (Some(local), None) => {
+                let raw = open(&root, &local.device_secret, &aad_device(&f.vault_id, &local.device_id))?;
+                let secret: [u8; 32] = raw[..].try_into().map_err(|_| Error::Malformed("device key".into()))?;
+                (local.device_id, Zeroizing::new(secret), local.clock, None)
+            }
+            (None, None) => return Err(Error::NeedsDeviceSetup),
+        };
+
+        let mut vault = Self {
+            vault_id: f.vault_id,
+            slots: f.slots,
+            identity_public: f.identity_public,
+            identity,
+            identity_secret: f.identity_secret,
             root,
-            collections,
+            account,
+            collections: Vec::new(),
+            device_id,
+            device_secret,
+            clock,
+        };
+        for rec in f.collections {
+            match vault.open_record(rec) {
+                Ok(oc) => vault.collections.push(oc),
+                // No key for us (e.g. removed from a shared collection): drop it.
+                Err(Error::NotAllowed(_)) => {}
+                // Our key is there but the data doesn't decrypt: corruption, don't silently lose it.
+                Err(e) => return Err(e),
+            }
+        }
+        if let Some(name) = new_name {
+            vault.register_this_device(&name);
+        }
+        Ok(vault)
+    }
+
+    fn migrate_v1(f: FileV1, root: Key) -> Result<Self> {
+        let old = legacy::open_collections(&f, &root)?;
+        let identity = Identity::from_secret_bytes(&open(&root, &f.identity_secret, &aad(&f.vault_id, AAD_IDENTITY))?)?;
+        let device_id = Uuid::new_v4();
+        let mut clock = Clock::new(device_id);
+        let mut vault = Self {
+            vault_id: f.vault_id,
+            slots: Slots { kdf: f.kdf, password: f.password_slot, recovery: f.recovery_slot, stamp: clock.tick() },
+            identity_public: identity.public(),
+            identity,
+            identity_secret: f.identity_secret,
+            root,
+            account: AccountDoc::new(DEFAULT_PROFILE_NAME.into(), clock.tick()),
+            collections: Vec::new(),
+            device_id,
+            device_secret: random_device_secret()?,
+            clock,
+        };
+        vault.register_this_device(DEFAULT_DEVICE_NAME);
+        for c in old {
+            vault.insert_new_collection(c.id, c.key, &c.name)?;
+            for e in c.entries {
+                let data = EntryData {
+                    title: e.title,
+                    username: e.username,
+                    password: e.password,
+                    url: e.url,
+                    notes: e.notes,
+                    created_at: e.created_at,
+                };
+                vault.put_entry(c.id, e.id, Some(data))?;
+            }
+        }
+        Ok(vault)
+    }
+
+    pub fn to_file(&self) -> Result<VaultFile> {
+        let mut f = self.file_for_new_device()?;
+        f.local = Some(DeviceLocal {
+            device_id: self.device_id,
+            device_secret: seal(&self.root, self.device_secret.as_ref(), &aad_device(&self.vault_id, &self.device_id))?,
+            clock: self.clock,
+        });
+        Ok(VaultFile::Current(Box::new(f)))
+    }
+
+    /// Copy of the vault for a device being paired (no device-local data).
+    pub fn file_for_new_device(&self) -> Result<FileV2> {
+        Ok(FileV2 {
+            format: FORMAT_VERSION,
+            vault_id: self.vault_id,
+            slots: self.slots.clone(),
+            identity_public: self.identity_public.clone(),
+            identity_secret: self.identity_secret.clone(),
+            account: self.seal_account()?,
+            collections: self.collections.iter().map(|c| self.record(c)).collect::<Result<_>>()?,
+            local: None,
         })
     }
 
-    /// Re-encrypts all collections (fresh nonces) into the on-disk format.
-    pub fn to_file(&self) -> Result<VaultFile> {
-        let mut records = Vec::with_capacity(self.collections.len());
-        for c in &self.collections {
-            let data = CollectionData {
-                name: c.inner.name.clone(),
-                entries: c.inner.entries.clone(),
-                updated_at: c.inner.updated_at,
-            };
-            let plain = Zeroizing::new(serde_json::to_vec(&data)?);
-            records.push(CollectionRecord {
-                id: c.inner.id,
-                wrapped_key: c.wrapped_key.clone(),
-                data: seal(&c.key, &plain, &aad_cdata(&self.vault_id, &c.inner.id))?,
-            });
-        }
-        Ok(VaultFile {
-            format: FORMAT_VERSION,
-            vault_id: self.vault_id,
-            kdf: self.kdf,
-            password_slot: self.password_slot.clone(),
-            recovery_slot: self.recovery_slot.clone(),
-            identity_public: self.identity_public.clone(),
-            identity_secret: self.identity_secret.clone(),
-            collections: records,
+    fn seal_account(&self) -> Result<Sealed> {
+        let plain = Zeroizing::new(serde_json::to_vec(&self.account)?);
+        seal(&self.root, &plain, &aad(&self.vault_id, AAD_ACCOUNT))
+    }
+
+    fn record(&self, c: &OpenCollection) -> Result<CollectionRecord> {
+        let plain = Zeroizing::new(serde_json::to_vec(&c.doc)?);
+        Ok(CollectionRecord {
+            id: c.view.id,
+            owner: c.owner.clone(),
+            keys: c.keys.clone(),
+            body: seal(&c.key, &plain, &aad_body(&c.view.id))?,
         })
+    }
+
+    fn open_record(&self, rec: CollectionRecord) -> Result<OpenCollection> {
+        let me = self.user_id();
+        let wrap = rec.keys.iter().find(|w| w.recipient == me).ok_or(Error::NotAllowed("no key for us".into()))?;
+        let key = Key::from_bytes(&self.identity.open_box(&wrap.sealed, &aad_key(&rec.id))?)?;
+        let doc: CollectionDoc = serde_json::from_slice(&open(&key, &rec.body, &aad_body(&rec.id))?)?;
+        let view = build_view(rec.id, &rec.owner, &doc, &me);
+        Ok(OpenCollection { owner: rec.owner, keys: rec.keys, key, doc, view })
     }
 
     pub fn change_password(&mut self, new_password: &str) -> Result<()> {
-        self.password_slot =
-            make_slot(new_password.as_bytes(), &self.root, &self.kdf, &aad(&self.vault_id, AAD_PASSWORD))?;
+        self.slots.password =
+            make_slot(new_password.as_bytes(), &self.root, &self.slots.kdf, &aad(&self.vault_id, AAD_PASSWORD))?;
+        self.slots.stamp = self.clock.tick();
         Ok(())
     }
 
     /// Issues a new backup code; the previous one is invalidated on save.
     pub fn rotate_backup_code(&mut self) -> Result<BackupCode> {
         let code = BackupCode::generate()?;
-        self.recovery_slot = make_slot(code.as_bytes(), &self.root, &self.kdf, &aad(&self.vault_id, AAD_RECOVERY))?;
+        self.slots.recovery =
+            make_slot(code.as_bytes(), &self.root, &self.slots.kdf, &aad(&self.vault_id, AAD_RECOVERY))?;
+        self.slots.stamp = self.clock.tick();
         Ok(code)
     }
+
+    // --- identity, profile, devices --------------------------------------------
 
     pub fn vault_id(&self) -> Uuid {
         self.vault_id
@@ -250,46 +430,239 @@ impl Vault {
         &self.identity_public
     }
 
-    // --- collections -----------------------------------------------------
+    pub fn user_id(&self) -> UserId {
+        self.identity_public.user_id()
+    }
 
+    pub fn device_id(&self) -> Uuid {
+        self.device_id
+    }
+
+    /// Secret key for this device's iroh endpoint.
+    pub fn device_secret(&self) -> [u8; 32] {
+        *self.device_secret
+    }
+
+    pub fn node_id(&self) -> String {
+        device_node_id(&self.device_secret)
+    }
+
+    pub fn profile_name(&self) -> &str {
+        &self.account.profile_name.value
+    }
+
+    pub fn set_profile_name(&mut self, name: &str) {
+        self.account.profile_name = Lww::new(name.trim().to_string(), self.clock.tick());
+    }
+
+    fn register_this_device(&mut self, name: &str) {
+        let id = self.node_id();
+        self.add_device(&id, name);
+    }
+
+    /// Adds (or renames/restores) one of the user's devices by endpoint id.
+    pub fn add_device(&mut self, node_id: &str, name: &str) {
+        let stamp = self.clock.tick();
+        self.account
+            .devices
+            .insert(node_id.to_string(), Lww::new(Device { name: name.trim().to_string(), removed: false }, stamp));
+    }
+
+    pub fn remove_device(&mut self, node_id: &str) -> Result<()> {
+        if node_id == self.node_id() {
+            return Err(Error::NotAllowed("can't remove this device".into()));
+        }
+        let name =
+            self.account.devices.get(node_id).ok_or(Error::Malformed("unknown device".into()))?.value.name.clone();
+        let stamp = self.clock.tick();
+        self.account.devices.insert(node_id.to_string(), Lww::new(Device { name, removed: true }, stamp));
+        Ok(())
+    }
+
+    pub fn devices(&self) -> Vec<DeviceView> {
+        let me = self.node_id();
+        self.account
+            .active_devices()
+            .map(|(id, d)| DeviceView { node_id: id.clone(), name: d.name.clone(), this_device: *id == me })
+            .collect()
+    }
+
+    // --- contacts ----------------------------------------------------------------
+
+    /// Our current contact card (name, identity, active devices).
+    pub fn my_card(&self) -> ContactCard {
+        let mut devices: Vec<String> = self.account.active_devices().map(|(id, _)| id.clone()).collect();
+        devices.sort();
+        // Deterministic stamp: only changes when name or devices change.
+        let stamp = self
+            .account
+            .devices
+            .values()
+            .map(|d| d.stamp)
+            .chain([self.account.profile_name.stamp])
+            .max()
+            .unwrap_or(Stamp::ZERO);
+        ContactCard::new(&self.identity, self.profile_name().to_string(), devices, stamp)
+    }
+
+    pub fn add_contact(&mut self, card: ContactCard) -> Result<UserId> {
+        card.verify()?;
+        let uid = card.identity.user_id();
+        if uid == self.user_id() {
+            return Err(Error::NotAllowed("that's your own card".into()));
+        }
+        let removed = Lww::new(false, self.clock.tick());
+        match self.account.contacts.get_mut(&uid) {
+            Some(c) => {
+                c.removed = removed;
+                if card.stamp >= c.card.stamp {
+                    c.card = card;
+                }
+            }
+            None => {
+                self.account.contacts.insert(uid.clone(), Contact { card, removed });
+            }
+        }
+        Ok(uid)
+    }
+
+    pub fn remove_contact(&mut self, uid: &UserId) -> Result<()> {
+        let stamp = self.clock.tick();
+        let c = self.account.contacts.get_mut(uid).ok_or(Error::ContactNotFound)?;
+        c.removed = Lww::new(true, stamp);
+        Ok(())
+    }
+
+    pub fn contacts(&self) -> impl Iterator<Item = &ContactCard> {
+        self.account.active_contacts().map(|c| &c.card)
+    }
+
+    pub fn contact(&self, uid: &UserId) -> Option<&ContactCard> {
+        self.account.contact(uid).map(|c| &c.card)
+    }
+
+    // --- collections -------------------------------------------------------------
+
+    /// Visible (not deleted) collections.
     pub fn collections(&self) -> impl Iterator<Item = &Collection> {
-        self.collections.iter().map(|c| &c.inner)
+        self.collections.iter().filter(|c| !c.doc.meta.meta.deleted).map(|c| &c.view)
     }
 
     pub fn collection(&self, id: Uuid) -> Option<&Collection> {
         self.collections().find(|c| c.id == id)
     }
 
-    fn collection_mut(&mut self, id: Uuid) -> Result<&mut Collection> {
-        self.collections.iter_mut().map(|c| &mut c.inner).find(|c| c.id == id).ok_or(Error::CollectionNotFound)
+    fn open_mut(&mut self, id: Uuid) -> Result<&mut OpenCollection> {
+        self.collections
+            .iter_mut()
+            .find(|c| c.view.id == id && !c.doc.meta.meta.deleted)
+            .ok_or(Error::CollectionNotFound)
+    }
+
+    fn me_as_member(&self, role: Role) -> Member {
+        Member { identity: self.identity_public.clone(), name: self.profile_name().to_string(), role }
+    }
+
+    fn insert_new_collection(&mut self, id: Uuid, key: Key, name: &str) -> Result<()> {
+        let meta = Meta {
+            name: name.to_string(),
+            deleted: false,
+            members: vec![self.me_as_member(Role::Owner)],
+            stamp: self.clock.tick(),
+        };
+        let doc = CollectionDoc { meta: sign_meta(&self.identity, &id, meta), entries: Default::default() };
+        let keys = vec![KeyWrap {
+            recipient: self.user_id(),
+            sealed: self.identity_public.seal_to(key.as_bytes(), &aad_key(&id))?,
+        }];
+        let view = build_view(id, &self.identity_public, &doc, &self.user_id());
+        self.collections.push(OpenCollection { owner: self.identity_public.clone(), keys, key, doc, view });
+        Ok(())
     }
 
     pub fn create_collection(&mut self, name: &str) -> Result<Uuid> {
         let id = Uuid::new_v4();
-        let key = Key::random()?;
-        let wrapped_key = seal(&self.root, key.as_bytes(), &aad_ckey(&self.vault_id, &id))?;
-        self.collections.push(OpenCollection {
-            key,
-            wrapped_key,
-            inner: Collection { id, name: name.to_string(), entries: Vec::new(), updated_at: now() },
-        });
+        self.insert_new_collection(id, Key::random()?, name)?;
         Ok(id)
     }
 
-    pub fn rename_collection(&mut self, id: Uuid, name: &str) -> Result<()> {
-        let c = self.collection_mut(id)?;
-        c.name = name.to_string();
-        c.updated_at = now();
+    /// Owner-only change of the signed meta.
+    fn update_meta(&mut self, id: Uuid, f: impl FnOnce(&mut Meta) -> Result<()>) -> Result<()> {
+        let me = self.user_id();
+        let c = self
+            .collections
+            .iter()
+            .find(|c| c.view.id == id && !c.doc.meta.meta.deleted)
+            .ok_or(Error::CollectionNotFound)?;
+        if c.owner.user_id() != me {
+            return Err(Error::NotAllowed("only the owner can change this collection".into()));
+        }
+        let mut meta = c.doc.meta.meta.clone();
+        f(&mut meta)?;
+        meta.stamp = self.clock.tick();
+        let signed = sign_meta(&self.identity, &id, meta);
+        let oc = self.open_mut(id)?;
+        oc.doc.meta = signed;
+        let members: Vec<UserId> = oc.doc.meta.meta.members.iter().map(|m| m.identity.user_id()).collect();
+        oc.keys.retain(|k| members.contains(&k.recipient));
+        oc.view = build_view(id, &oc.owner, &oc.doc, &me);
         Ok(())
     }
 
-    /// Deletes a collection including all its entries.
-    pub fn delete_collection(&mut self, id: Uuid) -> Result<Collection> {
-        let pos = self.collections.iter().position(|c| c.inner.id == id).ok_or(Error::CollectionNotFound)?;
-        Ok(self.collections.remove(pos).inner)
+    pub fn rename_collection(&mut self, id: Uuid, name: &str) -> Result<()> {
+        let name = name.to_string();
+        self.update_meta(id, |m| {
+            m.name = name;
+            Ok(())
+        })
     }
 
-    // --- entries ---------------------------------------------------------
+    /// Deletes a collection for all members (owner only).
+    pub fn delete_collection(&mut self, id: Uuid) -> Result<Collection> {
+        let view = self.collection(id).cloned().ok_or(Error::CollectionNotFound)?;
+        self.update_meta(id, |m| {
+            m.deleted = true;
+            Ok(())
+        })?;
+        Ok(view)
+    }
+
+    /// Shares a collection with a contact (owner only). Also used to change a member's role.
+    pub fn share_collection(&mut self, id: Uuid, with: &UserId, role: Role) -> Result<()> {
+        if role == Role::Owner {
+            return Err(Error::NotAllowed("a collection has exactly one owner".into()));
+        }
+        let card = self.contact(with).cloned().ok_or(Error::ContactNotFound)?;
+        self.update_meta(id, |m| {
+            m.members.retain(|x| x.identity != card.identity);
+            m.members.push(Member { identity: card.identity.clone(), name: card.name.clone(), role });
+            Ok(())
+        })?;
+        let oc = self.open_mut(id)?;
+        if !oc.keys.iter().any(|k| &k.recipient == with) {
+            let sealed = card.identity.seal_to(oc.key.as_bytes(), &aad_key(&id))?;
+            oc.keys.push(KeyWrap { recipient: with.clone(), sealed });
+        }
+        Ok(())
+    }
+
+    /// Removes a member (owner only). They keep what they already synced.
+    pub fn unshare_collection(&mut self, id: Uuid, member: &UserId) -> Result<()> {
+        if *member == self.user_id() {
+            return Err(Error::NotAllowed("the owner can't be removed".into()));
+        }
+        let member = member.clone();
+        self.update_meta(id, |m| {
+            let before = m.members.len();
+            m.members.retain(|x| x.identity.user_id() != member);
+            if m.members.len() == before {
+                return Err(Error::ContactNotFound);
+            }
+            Ok(())
+        })
+    }
+
+    // --- entries -----------------------------------------------------------------
 
     /// All entries with the collection they belong to.
     pub fn entries(&self) -> impl Iterator<Item = (&Collection, &Entry)> {
@@ -307,158 +680,207 @@ impl Vault {
         self.entries().filter(|(_, e)| e.title.to_lowercase().contains(&q) || hit(&e.username) || hit(&e.url)).collect()
     }
 
+    fn put_entry(&mut self, cid: Uuid, eid: Uuid, data: Option<EntryData>) -> Result<()> {
+        let me = self.user_id();
+        if !self.collection(cid).ok_or(Error::CollectionNotFound)?.can_write() {
+            return Err(Error::NotAllowed("you can only view this collection".into()));
+        }
+        let version = EntryVersion { stamp: self.clock.tick(), author: me.clone(), data };
+        let signed = sign_entry(&self.identity, &cid, &eid, version);
+        let oc = self.open_mut(cid)?;
+        oc.doc.entries.insert(eid, signed);
+        oc.view = build_view(cid, &oc.owner, &oc.doc, &me);
+        Ok(())
+    }
+
     pub fn add_entry(&mut self, collection: Uuid, input: EntryInput) -> Result<Uuid> {
-        let ts = now();
-        let entry = Entry {
-            id: Uuid::new_v4(),
+        let id = Uuid::new_v4();
+        let data = EntryData {
             title: input.title,
             username: input.username,
             password: input.password,
             url: input.url,
             notes: input.notes,
-            created_at: ts,
-            updated_at: ts,
+            created_at: now(),
         };
-        let id = entry.id;
-        let c = self.collection_mut(collection)?;
-        c.entries.push(entry);
-        c.updated_at = ts;
+        self.put_entry(collection, id, Some(data))?;
         Ok(id)
     }
 
     pub fn update_entry(&mut self, id: Uuid, input: EntryInput) -> Result<()> {
-        let ts = now();
-        let c = self
-            .collections
-            .iter_mut()
-            .map(|c| &mut c.inner)
-            .find(|c| c.entries.iter().any(|e| e.id == id))
-            .ok_or(Error::EntryNotFound)?;
-        let e = c.entries.iter_mut().find(|e| e.id == id).expect("checked above");
-        e.title = input.title;
-        e.username = input.username;
-        e.password = input.password;
-        e.url = input.url;
-        e.notes = input.notes;
-        e.updated_at = ts;
-        c.updated_at = ts;
-        Ok(())
+        let (c, e) = self.entry(id).ok_or(Error::EntryNotFound)?;
+        let (cid, created_at) = (c.id, e.created_at);
+        let data = EntryData {
+            title: input.title,
+            username: input.username,
+            password: input.password,
+            url: input.url,
+            notes: input.notes,
+            created_at,
+        };
+        self.put_entry(cid, id, Some(data))
     }
 
     pub fn remove_entry(&mut self, id: Uuid) -> Result<Entry> {
-        for c in self.collections.iter_mut().map(|c| &mut c.inner) {
-            if let Some(pos) = c.entries.iter().position(|e| e.id == id) {
-                c.updated_at = now();
-                return Ok(c.entries.remove(pos));
+        let (c, e) = self.entry(id).ok_or(Error::EntryNotFound)?;
+        let (cid, old) = (c.id, e.clone());
+        self.put_entry(cid, id, None)?;
+        Ok(old)
+    }
+
+    // --- sync ----------------------------------------------------------------------
+
+    /// Classifies a remote iroh endpoint id; `None` = not someone we sync with.
+    pub fn classify_peer(&self, node_id: &str) -> Option<Peer> {
+        if node_id == self.node_id() {
+            return None;
+        }
+        if self.account.active_devices().any(|(id, _)| id == node_id) {
+            return Some(Peer::OwnDevice);
+        }
+        self.account
+            .active_contacts()
+            .find(|c| c.card.devices.iter().any(|d| d == node_id))
+            .map(|c| Peer::Contact(c.card.identity.user_id()))
+    }
+
+    /// Endpoints to dial: our other devices and all contacts' devices.
+    pub fn sync_targets(&self) -> Vec<(String, Peer)> {
+        let me = self.node_id();
+        let own =
+            self.account.active_devices().filter(|(id, _)| **id != me).map(|(id, _)| (id.clone(), Peer::OwnDevice));
+        let contacts = self.account.active_contacts().flat_map(|c| {
+            let uid = c.card.identity.user_id();
+            c.card.devices.iter().map(move |d| (d.clone(), Peer::Contact(uid.clone())))
+        });
+        own.chain(contacts).collect()
+    }
+
+    pub fn sync_message(&self, peer: &Peer) -> Result<SyncMessage> {
+        let collections = self
+            .collections
+            .iter()
+            .filter(|c| match peer {
+                Peer::OwnDevice => true,
+                Peer::Contact(uid) => c.doc.meta.meta.member(uid).is_some(),
+            })
+            .map(|c| self.record(c))
+            .collect::<Result<_>>()?;
+        let own = match peer {
+            Peer::OwnDevice => Some(OwnState { slots: self.slots.clone(), account: self.seal_account()? }),
+            Peer::Contact(_) => None,
+        };
+        Ok(SyncMessage { card: self.my_card(), own, collections })
+    }
+
+    pub fn apply_sync(&mut self, peer: &Peer, msg: SyncMessage) -> Result<SyncReport> {
+        msg.card.verify()?;
+        let mut report = SyncReport::default();
+        match peer {
+            Peer::OwnDevice => {
+                if msg.card.identity != self.identity_public {
+                    return Err(Error::NotAllowed("device belongs to another user".into()));
+                }
+                let own = msg.own.ok_or(Error::Malformed("missing own-device state".into()))?;
+                if own.slots.stamp > self.slots.stamp {
+                    self.clock.observe(own.slots.stamp);
+                    self.slots = own.slots;
+                    report.changed = true;
+                }
+                let other: AccountDoc =
+                    serde_json::from_slice(&open(&self.root, &own.account, &aad(&self.vault_id, AAD_ACCOUNT))?)?;
+                report.changed |= self.account.merge(other);
+            }
+            Peer::Contact(uid) => {
+                if msg.card.identity.user_id() != *uid {
+                    return Err(Error::NotAllowed("card does not match peer".into()));
+                }
+                report.changed |= self.account.update_card(msg.card);
             }
         }
-        Err(Error::EntryNotFound)
+
+        let me = self.user_id();
+        for rec in msg.collections {
+            let pos = self.collections.iter().position(|c| c.view.id == rec.id);
+            match pos {
+                Some(i) => {
+                    let oc = &mut self.collections[i];
+                    if rec.owner != oc.owner {
+                        report.rejected += 1;
+                        continue;
+                    }
+                    let Ok(plain) = open(&oc.key, &rec.body, &aad_body(&rec.id)) else {
+                        report.rejected += 1;
+                        continue;
+                    };
+                    let incoming: CollectionDoc = serde_json::from_slice(&plain)?;
+                    let stats = oc.doc.merge(&rec.id, &oc.owner, incoming);
+                    for k in rec.keys {
+                        if !oc.keys.iter().any(|x| x.recipient == k.recipient) {
+                            oc.keys.push(k);
+                        }
+                    }
+                    let members: Vec<UserId> = oc.doc.meta.meta.members.iter().map(|m| m.identity.user_id()).collect();
+                    oc.keys.retain(|k| members.contains(&k.recipient));
+                    report.rejected += stats.rejected;
+                    report.entries_updated += stats.entries_updated;
+                    if stats.changed() {
+                        report.changed = true;
+                        oc.view = build_view(rec.id, &oc.owner, &oc.doc, &me);
+                        let max = oc.doc.max_stamp();
+                        self.clock.observe(max);
+                    }
+                }
+                None => {
+                    let owner_ok =
+                        rec.owner == self.identity_public || self.account.contact(&rec.owner.user_id()).is_some();
+                    let cid = rec.id;
+                    let opened = if owner_ok { self.open_record(rec).ok() } else { None };
+                    match opened {
+                        Some(oc) if oc.doc.verify_all(&cid, &oc.owner).is_ok() && oc.view.my_role.is_some() => {
+                            self.clock.observe(oc.doc.max_stamp());
+                            self.collections.push(oc);
+                            report.new_collections += 1;
+                            report.changed = true;
+                        }
+                        _ => report.rejected += 1,
+                    }
+                }
+            }
+        }
+        Ok(report)
     }
 }
 
-fn check_format(file: &VaultFile) -> Result<()> {
-    if file.format != FORMAT_VERSION {
-        return Err(Error::UnsupportedFormat(file.format));
+fn build_view(id: Uuid, owner: &IdentityPublic, doc: &CollectionDoc, me: &UserId) -> Collection {
+    let meta = &doc.meta.meta;
+    let entries: Vec<Entry> = doc
+        .entries
+        .iter()
+        .filter_map(|(eid, e)| {
+            let d = e.version.data.as_ref()?;
+            Some(Entry {
+                id: *eid,
+                title: d.title.clone(),
+                username: d.username.clone(),
+                password: d.password.clone(),
+                url: d.url.clone(),
+                notes: d.notes.clone(),
+                created_at: d.created_at,
+                updated_at: e.version.stamp.secs(),
+            })
+        })
+        .collect();
+    Collection {
+        id,
+        name: meta.name.clone(),
+        updated_at: doc.max_stamp().secs(),
+        entries,
+        owner: owner.user_id(),
+        members: meta.members.clone(),
+        my_role: meta.member(me).map(|m| m.role),
     }
-    Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn kdf() -> KdfParams {
-        KdfParams::insecure_fast()
-    }
-
-    fn sample() -> EntryInput {
-        EntryInput {
-            title: "GitHub".into(),
-            username: Some("dude".into()),
-            password: "hunter2".into(),
-            url: Some("https://github.com".into()),
-            notes: None,
-        }
-    }
-
-    /// Simulates save + load through JSON.
-    fn roundtrip(v: &Vault) -> VaultFile {
-        let json = serde_json::to_string(&v.to_file().unwrap()).unwrap();
-        serde_json::from_str(&json).unwrap()
-    }
-
-    #[test]
-    fn create_and_unlock() {
-        let (mut v, _code) = Vault::create("correct horse", kdf()).unwrap();
-        let personal = v.collections().next().unwrap().id;
-        let eid = v.add_entry(personal, sample()).unwrap();
-
-        let v2 = Vault::unlock(roundtrip(&v), "correct horse").unwrap();
-        let (c, e) = v2.entry(eid).unwrap();
-        assert_eq!(c.name, DEFAULT_COLLECTION);
-        assert_eq!(e.password, "hunter2");
-        assert_eq!(v2.identity_public(), v.identity_public());
-    }
-
-    #[test]
-    fn wrong_password_fails() {
-        let (v, _) = Vault::create("correct horse", kdf()).unwrap();
-        assert!(matches!(Vault::unlock(roundtrip(&v), "wrong"), Err(Error::Decrypt)));
-    }
-
-    #[test]
-    fn recover_with_backup_code_rotates_code_and_password() {
-        let (mut v, code) = Vault::create("old password", kdf()).unwrap();
-        let personal = v.collections().next().unwrap().id;
-        let eid = v.add_entry(personal, sample()).unwrap();
-        let file = roundtrip(&v);
-
-        let parsed = BackupCode::parse(&code.display()).unwrap();
-        let (recovered, new_code) = Vault::recover(file, &parsed, "new password").unwrap();
-        assert_eq!(recovered.entry(eid).unwrap().1.password, "hunter2");
-        let file = roundtrip(&recovered);
-
-        assert!(Vault::unlock(file.clone(), "old password").is_err());
-        assert!(Vault::unlock(file.clone(), "new password").is_ok());
-        assert!(Vault::recover(file.clone(), &code, "x").is_err(), "old code must be invalid");
-        assert!(Vault::recover(file, &new_code, "x").is_ok());
-    }
-
-    #[test]
-    fn change_password_keeps_backup_code() {
-        let (mut v, code) = Vault::create("one", kdf()).unwrap();
-        v.change_password("two").unwrap();
-        let file = roundtrip(&v);
-        assert!(Vault::unlock(file.clone(), "one").is_err());
-        assert!(Vault::unlock(file.clone(), "two").is_ok());
-        assert!(Vault::recover(file, &code, "three").is_ok());
-    }
-
-    #[test]
-    fn swapped_collection_blobs_are_rejected() {
-        let (mut v, _) = Vault::create("pw", kdf()).unwrap();
-        v.create_collection("Work").unwrap();
-        let mut file = roundtrip(&v);
-        let (a, b) = (file.collections[0].data.clone(), file.collections[1].data.clone());
-        file.collections[0].data = b;
-        file.collections[1].data = a;
-        assert!(matches!(Vault::unlock(file, "pw"), Err(Error::Decrypt)));
-    }
-
-    #[test]
-    fn entry_crud_and_search() {
-        let (mut v, _) = Vault::create("pw", kdf()).unwrap();
-        let work = v.create_collection("Work").unwrap();
-        let id = v.add_entry(work, sample()).unwrap();
-        assert_eq!(v.search("git").len(), 1);
-        assert_eq!(v.search("DUDE").len(), 1);
-        assert!(v.search("gitlab").is_empty());
-
-        v.update_entry(id, EntryInput { title: "GitLab".into(), ..sample() }).unwrap();
-        assert_eq!(v.search("gitlab").len(), 1);
-
-        v.remove_entry(id).unwrap();
-        assert!(v.entry(id).is_none());
-        assert!(matches!(v.remove_entry(id), Err(Error::EntryNotFound)));
-    }
-}
+mod tests;

@@ -11,9 +11,11 @@ path = "src/main.rs"
 
 [dependencies]
 vaulti-core.workspace = true
+vaulti-sync.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 rpassword = "7"
 dirs = "6"
 zeroize = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }

@@ -48,7 +48,7 @@ mod tests {
         let (v, _) = Vault::create("pw", KdfParams::insecure_fast()).unwrap();
         save(&path, &v.to_file().unwrap()).unwrap();
         let loaded = load(&path).unwrap();
-        assert_eq!(loaded.vault_id, v.vault_id());
+        assert!(matches!(&loaded, crate::VaultFile::Current(f) if f.vault_id == v.vault_id()));
         assert!(Vault::unlock(loaded, "pw").is_ok());
         assert!(!path.with_extension("tmp").exists());
 

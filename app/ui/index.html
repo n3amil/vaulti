@@ -19,6 +19,30 @@
       <label>Repeat <input type="password" name="repeat" autocomplete="new-password" required></label>
       <p class="error" data-error></p>
       <button class="primary" type="submit">Create vault</button>
+      <button type="button" class="link" id="go-join">I already use Vaulti on another device</button>
+    </form>
+  </section>
+
+  <!-- Join from another device -->
+  <section id="screen-join" class="screen center" hidden>
+    <form class="card" id="join-form">
+      <h1>Add this device</h1>
+      <div data-step="ticket">
+        <p class="muted">On your other device open <b>Devices → Pair new device</b> and copy the pairing code here. Both devices need to be online.</p>
+        <label>Pairing code <textarea name="ticket" rows="4" class="mono" spellcheck="false" placeholder="vaulti-pair:…" autofocus></textarea></label>
+        <label>Name for this device <input name="device" autocomplete="off" placeholder="e.g. Work laptop"></label>
+        <div class="join-code" data-join-code hidden>
+          <p class="muted">Confirm on your other device that it shows:</p>
+          <div class="pair-code" data-code></div>
+        </div>
+      </div>
+      <div data-step="password" hidden>
+        <p class="muted">Received your vault. Unlock it with your master password.</p>
+        <label>Master password <input type="password" name="password" autocomplete="current-password"></label>
+      </div>
+      <p class="error" data-error></p>
+      <button class="primary" type="submit" data-submit>Connect</button>
+      <button type="button" class="link" id="back-to-setup">Back</button>
     </form>
   </section>
 
@@ -67,8 +91,11 @@
       <div class="nav-heading">Collections <button class="icon" id="new-collection" title="New collection">+</button></div>
       <div id="collection-list"></div>
       <div class="spacer"></div>
+      <button class="nav-item" id="open-devices">Devices</button>
+      <button class="nav-item" id="open-contacts">Contacts</button>
       <button class="nav-item" id="open-settings">Settings</button>
       <button class="nav-item" id="lock-now">Lock</button>
+      <button class="sync-status" id="sync-status" title="Sync now"><span class="dot"></span><span data-text>Starting…</span></button>
     </nav>
 
     <div class="list-pane">
@@ -78,8 +105,12 @@
       </div>
       <div class="list-title">
         <h2 id="list-title">All items</h2>
-        <button class="link" id="edit-collection" hidden>Edit</button>
+        <span class="row">
+          <button class="link" id="share-collection" hidden>Share</button>
+          <button class="link" id="edit-collection" hidden>Edit</button>
+        </span>
       </div>
+      <p class="collection-info muted small" id="collection-info" hidden></p>
       <ul id="entry-list" class="entry-list"></ul>
       <p id="empty-list" class="muted empty" hidden>No entries yet.</p>
     </div>
@@ -132,6 +163,12 @@
   <dialog id="settings-dialog">
     <div class="settings">
       <h2>Settings</h2>
+      <form id="profile-form">
+        <h3>Your name</h3>
+        <p class="muted">Shown to people you share collections with.</p>
+        <span class="row"><input name="name" autocomplete="off" required><button type="submit">Save</button></span>
+        <p class="error" data-error></p>
+      </form>
       <form id="password-form">
         <h3>Change master password</h3>
         <p class="muted">Your backup code stays the same.</p>
@@ -150,6 +187,90 @@
         <p class="muted">Locks automatically after 5 minutes of inactivity. Copied passwords are cleared from the clipboard after 30 seconds.</p>
         <p class="muted small">Vault file: <span id="vault-path" class="mono"></span></p>
       </div>
+      <div class="actions"><button data-action="close">Close</button></div>
+    </div>
+  </dialog>
+
+  <!-- Share collection -->
+  <dialog id="share-dialog">
+    <div>
+      <h2 data-title>Share</h2>
+      <p class="muted">Members get the collection on their devices the next time you're both online.</p>
+      <ul class="member-list" data-members></ul>
+      <form data-add>
+        <h3>Add someone</h3>
+        <div data-has-contacts>
+          <span class="row">
+            <select name="contact"></select>
+            <select name="role">
+              <option value="editor">Can edit</option>
+              <option value="viewer">Can view</option>
+            </select>
+            <button class="primary" type="submit">Add</button>
+          </span>
+        </div>
+        <p class="muted" data-no-contacts hidden>Add people under <b>Contacts</b> first, then share with them here.</p>
+        <p class="error" data-error></p>
+      </form>
+      <p class="muted small">Removing someone stops future updates. They keep what they already received, so change those passwords if needed.</p>
+      <div class="actions"><button data-action="close">Done</button></div>
+    </div>
+  </dialog>
+
+  <!-- Devices -->
+  <dialog id="devices-dialog" class="wide">
+    <div>
+      <h2>Your devices</h2>
+      <p class="muted">Devices sync directly with each other whenever they're online at the same time.</p>
+      <ul class="device-list" data-devices></ul>
+      <div data-pair-start>
+        <button class="primary" data-action="pair">Pair new device</button>
+      </div>
+      <div class="pairing" data-pairing hidden>
+        <h3>Pair a new device</h3>
+        <p class="muted">On the new device install Vaulti and choose <b>I already use Vaulti on another device</b>, then paste this code. It works once and expires in 10 minutes.</p>
+        <div class="pairing-body">
+          <img data-qr alt="Pairing QR code">
+          <div class="pairing-code">
+            <textarea data-ticket rows="6" class="mono" readonly></textarea>
+            <span class="row"><button data-action="copy-ticket">Copy code</button><button data-action="cancel-pair">Cancel</button></span>
+            <p class="muted small" data-pair-wait>Waiting for the other device…</p>
+          </div>
+        </div>
+        <div class="pair-request" data-request hidden>
+          <p><b data-req-name></b> wants to join. Check that it shows this code:</p>
+          <div class="pair-code" data-req-code></div>
+          <span class="row">
+            <button class="danger" data-action="reject-pair">Doesn't match</button>
+            <button class="primary" data-action="accept-pair">Codes match, pair</button>
+          </span>
+        </div>
+      </div>
+      <div class="actions"><button data-action="close">Close</button></div>
+    </div>
+  </dialog>
+
+  <!-- Contacts -->
+  <dialog id="contacts-dialog" class="wide">
+    <div>
+      <h2>Contacts</h2>
+      <p class="muted">People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.</p>
+      <div class="my-card">
+        <h3>Your contact card</h3>
+        <p class="small">Fingerprint: <span class="mono" data-my-fp></span></p>
+        <button data-action="copy-card">Copy my card</button>
+      </div>
+      <form data-add-contact>
+        <h3>Add a contact</h3>
+        <textarea name="card" rows="3" class="mono" spellcheck="false" placeholder="vaulti-contact:…"></textarea>
+        <div class="contact-preview" data-preview hidden>
+          <p><b data-name></b><br><span class="small">Fingerprint: <span class="mono" data-fp></span></span></p>
+          <p class="muted small">Check that this fingerprint matches what they see under Contacts → Your contact card.</p>
+        </div>
+        <p class="error" data-error></p>
+        <span class="row"><button type="submit" class="primary" data-submit>Check card</button></span>
+      </form>
+      <ul class="contact-list" data-contacts></ul>
       <div class="actions"><button data-action="close">Close</button></div>
     </div>
   </dialog>

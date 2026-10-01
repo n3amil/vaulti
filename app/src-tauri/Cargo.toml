@@ -14,9 +14,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 vaulti-core.workspace = true
+vaulti-sync.workspace = true
 serde.workspace = true
 uuid.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 dirs = "6"
 zeroize = "1"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }

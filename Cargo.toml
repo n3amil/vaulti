@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["core", "cli", "app/src-tauri"]
+members = ["core", "sync", "cli", "app/src-tauri"]
 # Host builds skip the app (needs WebKitGTK); build it via scripts/docker.sh.
-default-members = ["core", "cli"]
+default-members = ["core", "sync", "cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 vaulti-core = { path = "core" }
+vaulti-sync = { path = "sync" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

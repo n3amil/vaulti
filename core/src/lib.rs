@@ -1,19 +1,27 @@
-//! Vaulti core: vault format, crypto and recovery.
+//! Vaulti core: vault format, crypto, recovery, sharing and the sync merge
+//! logic. No networking here; transport lives in `vaulti-sync`.
 //!
-//! P2P sync (iroh) and collection sharing build on top of this; the key
-//! hierarchy is documented in [`vault`].
+//! The key hierarchy is documented in [`vault`].
 
+pub mod account;
 mod b64;
+pub mod collection;
 pub mod crypto;
 pub mod error;
 pub mod generator;
+pub mod identity;
+mod legacy;
 pub mod model;
 pub mod recovery;
+pub mod stamp;
 pub mod store;
 pub mod vault;
 
+pub use account::ContactCard;
+pub use collection::{Member, Role};
 pub use crypto::KdfParams;
 pub use error::{Error, Result};
-pub use model::{Collection, Entry, EntryInput};
+pub use identity::{IdentityPublic, UserId};
+pub use model::{Collection, DeviceView, Entry, EntryInput};
 pub use recovery::BackupCode;
-pub use vault::{Vault, VaultFile};
+pub use vault::{FileV2, Peer, SyncMessage, SyncReport, Vault, VaultFile};

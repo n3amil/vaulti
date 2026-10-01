@@ -2,6 +2,7 @@
 // textContent (never innerHTML) — this is a password manager.
 
 const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
 const $ = (sel, root = document) => root.querySelector(sel);
 
 const AUTO_LOCK_MS = 5 * 60 * 1000;
@@ -75,14 +76,26 @@ function avatar(title) {
   return el;
 }
 
-const collectionName = (id) => state.overview?.collections.find((c) => c.id === id)?.name ?? '';
+const collectionById = (id) => state.overview?.collections.find((c) => c.id === id);
+const collectionName = (id) => collectionById(id)?.name ?? '';
+const canWrite = (c) => c && (c.my_role === 'owner' || c.my_role === 'editor');
+const writableCollections = () => state.overview.collections.filter(canWrite);
+const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' };
+
+function timeAgo(secs) {
+  const d = Math.max(0, Math.round(Date.now() / 1000 - secs));
+  if (d < 60) return 'just now';
+  if (d < 3600) return `${Math.floor(d / 60)} min ago`;
+  return new Date(secs * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 // --- auth flows ----------------------------------------------------------------
 
 async function boot() {
   const s = await invoke('status');
   $('#vault-path').textContent = s.path;
-  if (!s.exists) show('setup');
+  if (s.pending_join) showJoinStep('password');
+  else if (!s.exists) show('setup');
   else if (!s.unlocked) show('lock');
   else await enterMain();
 }
@@ -135,6 +148,57 @@ $('#unlock-form').addEventListener('submit', async (e) => {
   });
 });
 
+// --- join from another device ---------------------------------------------------------
+
+const joinForm = $('#join-form');
+let joinStep = 'ticket';
+
+function showJoinStep(step) {
+  joinStep = step;
+  for (const el of joinForm.querySelectorAll('[data-step]')) el.hidden = el.dataset.step !== step;
+  $('[data-submit]', joinForm).textContent = step === 'ticket' ? 'Connect' : 'Unlock';
+  setError(joinForm, '');
+  show('join');
+  (step === 'ticket' ? joinForm.elements.ticket : joinForm.elements.password).focus();
+}
+
+$('#go-join').addEventListener('click', () => {
+  joinForm.reset();
+  showJoinStep('ticket');
+});
+$('#back-to-setup').addEventListener('click', async () => {
+  await invoke('join_cancel');
+  joinForm.reset();
+  show('setup');
+});
+
+joinForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = joinForm.elements;
+  setError(joinForm, '');
+  await busy($('[data-submit]', joinForm), async () => {
+    try {
+      if (joinStep === 'ticket') {
+        $('[data-submit]', joinForm).textContent = 'Connecting…';
+        try {
+          await invoke('join_fetch', { ticket: f.ticket.value, deviceName: f.device.value });
+        } finally {
+          $('[data-join-code]', joinForm).hidden = true;
+        }
+        showJoinStep('password');
+      } else {
+        await invoke('join_unlock', { password: f.password.value });
+        joinForm.reset();
+        await enterMain();
+        toast('This device is now paired');
+      }
+    } catch (err) {
+      if (joinStep === 'ticket') $('[data-submit]', joinForm).textContent = 'Connect';
+      setError(joinForm, err);
+    }
+  });
+});
+
 $('#go-recover').addEventListener('click', () => show('recover'));
 $('#back-to-lock').addEventListener('click', () => show('lock'));
 
@@ -164,6 +228,7 @@ async function lock() {
   $('#collection-list').replaceChildren();
   $('#detail').replaceChildren(h('p', { class: 'muted empty', text: 'Select an entry' }));
   $('#search').value = '';
+  renderSyncStatus(null);
   show('lock');
 }
 
@@ -185,6 +250,7 @@ async function enterMain() {
   state.unlocked = true;
   lastActivity = Date.now();
   await refresh();
+  renderSyncStatus(await invoke('sync_status'));
   show('main');
 }
 
@@ -212,7 +278,7 @@ function renderSidebar() {
             class: 'nav-item' + (c.id === state.collection ? ' active' : ''),
             onclick: () => selectCollection(c.id),
           },
-          h('span', { text: c.name }),
+          h('span', { class: 'name' }, c.name, c.members.length > 1 ? h('span', { class: 'badge', text: 'shared' }) : null),
           h('span', { class: 'count', text: c.count }),
         ),
       ),
@@ -229,8 +295,15 @@ function visibleEntries() {
 
 function renderList() {
   const rows = visibleEntries();
-  $('#list-title').textContent = state.collection ? collectionName(state.collection) : 'All items';
-  $('#edit-collection').hidden = state.collection === null;
+  const c = collectionById(state.collection);
+  $('#list-title').textContent = c ? c.name : 'All items';
+  $('#edit-collection').hidden = c?.my_role !== 'owner';
+  $('#share-collection').hidden = c?.my_role !== 'owner';
+  const info = $('#collection-info');
+  info.hidden = !c || c.members.length < 2;
+  if (c && c.my_role !== 'owner') info.textContent = `Shared by ${c.owner_name} · ${c.my_role === 'viewer' ? 'view only' : 'you can edit'}`;
+  else if (c) info.textContent = `Shared with ${c.members.filter((m) => !m.is_me).map((m) => m.name).join(', ')}`;
+  $('#new-entry').disabled = c ? !canWrite(c) : writableCollections().length === 0;
   $('#empty-list').hidden = rows.length > 0;
   $('#empty-list').textContent = state.query ? 'No matches.' : 'No entries yet.';
   $('#entry-list').replaceChildren(
@@ -306,15 +379,18 @@ async function renderDetail() {
   if (e.url) fields.push(field('Website', h('span', { text: e.url }), h('button', { text: 'Copy', onclick: () => copy(e.id, 'url', 'Website') })));
   if (e.notes) fields.push(field('Notes', h('span', { text: e.notes })));
 
+  const writable = canWrite(collectionById(e.collection_id));
   $('#detail').replaceChildren(
     h('div', { class: 'detail-head' }, avatar(e.title), h('div', {}, h('h2', { text: e.title }), h('div', { class: 'muted', text: collectionName(e.collection_id) }))),
     ...fields,
-    h(
-      'div',
-      { class: 'detail-actions' },
-      h('button', { text: 'Edit', onclick: () => openEntryDialog(e) }),
-      h('button', { class: 'danger', text: 'Delete', onclick: () => deleteEntry(e) }),
-    ),
+    writable
+      ? h(
+          'div',
+          { class: 'detail-actions' },
+          h('button', { text: 'Edit', onclick: () => openEntryDialog(e) }),
+          h('button', { class: 'danger', text: 'Delete', onclick: () => deleteEntry(e) }),
+        )
+      : h('p', { class: 'muted small', text: 'View only: this collection is shared with you read-only.' }),
     h('div', { class: 'meta', text: `Updated ${new Date(e.updated_at * 1000).toLocaleString()}` }),
   );
 }
@@ -347,12 +423,13 @@ function openEntryDialog(existing = null) {
   $('[data-action=reveal]', entryForm).textContent = 'Show';
 
   f.collection.replaceChildren(
-    ...state.overview.collections
+    ...writableCollections()
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((c) => h('option', { value: c.id, text: c.name })),
   );
-  f.collection.value = existing?.collection_id ?? state.collection ?? state.overview.collections[0]?.id;
+  const preferred = canWrite(collectionById(state.collection)) ? state.collection : null;
+  f.collection.value = existing?.collection_id ?? preferred ?? writableCollections()[0]?.id;
 
   if (existing) {
     f.title.value = existing.title;
@@ -474,10 +551,22 @@ collectionForm.addEventListener('submit', async (e) => {
 // --- settings ----------------------------------------------------------------------------
 
 const settingsDialog = $('#settings-dialog');
-$('#open-settings').addEventListener('click', () => {
+$('#open-settings').addEventListener('click', async () => {
   $('#password-form').reset();
   setError($('#password-form'), '');
+  setError($('#profile-form'), '');
+  $('#profile-form').elements.name.value = (await invoke('profile')).name;
   settingsDialog.showModal();
+});
+
+$('#profile-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await invoke('set_profile_name', { name: e.target.elements.name.value });
+    toast('Name saved');
+  } catch (err) {
+    setError(e.target, err);
+  }
 });
 settingsDialog.addEventListener('click', (e) => {
   if (e.target.dataset?.action === 'close') settingsDialog.close();
@@ -511,6 +600,351 @@ $('#rotate-code').addEventListener('click', async () => {
   }
 });
 
+// --- sharing -------------------------------------------------------------------------------------
+
+const shareDialog = $('#share-dialog');
+const shareAdd = $('[data-add]', shareDialog);
+
+async function renderShareDialog() {
+  const c = collectionById(state.collection);
+  if (!c) return shareDialog.close();
+  $('[data-title]', shareDialog).textContent = `Share "${c.name}"`;
+  $('[data-members]', shareDialog).replaceChildren(
+    ...c.members.map((m) => {
+      const who = h('div', { class: 'who' }, h('div', { text: m.name + (m.is_me ? ' (you)' : '') }), h('div', { class: 'sub mono', text: m.fingerprint }));
+      if (m.role === 'owner') return h('li', {}, who, h('span', { class: 'muted small', text: 'Owner' }));
+      const role = h('select', { onchange: (e) => share(m.user_id, e.target.value) },
+        h('option', { value: 'editor', text: 'Can edit' }), h('option', { value: 'viewer', text: 'Can view' }));
+      role.value = m.role;
+      return h('li', {}, who, role, h('button', { class: 'danger', text: 'Remove', onclick: () => unshare(m) }));
+    }),
+  );
+  const members = new Set(c.members.map((m) => m.user_id));
+  const contacts = await invoke('contacts');
+  const candidates = contacts.filter((x) => !members.has(x.user_id));
+  shareAdd.elements.contact.replaceChildren(...candidates.map((x) => h('option', { value: x.user_id, text: `${x.name} (${x.fingerprint})` })));
+  $('[data-has-contacts]', shareDialog).hidden = candidates.length === 0;
+  $('[data-no-contacts]', shareDialog).hidden = candidates.length > 0;
+  $('[data-no-contacts]', shareDialog).textContent =
+    contacts.length === 0
+      ? 'Add people under Contacts first, then share with them here.'
+      : 'Everyone in your contacts is already a member.';
+}
+
+async function share(userId, role) {
+  try {
+    await invoke('share_collection', { id: state.collection, userId, role });
+    await refresh();
+    await renderShareDialog();
+  } catch (err) {
+    setError(shareAdd, err);
+  }
+}
+
+async function unshare(m) {
+  if (!(await confirmDialog(`Remove ${m.name} from this collection? They keep what they already synced.`, 'Remove'))) {
+    return shareDialog.showModal();
+  }
+  shareDialog.showModal();
+  try {
+    await invoke('unshare_collection', { id: state.collection, userId: m.user_id });
+    await refresh();
+    await renderShareDialog();
+    toast(`${m.name} removed`);
+  } catch (err) {
+    setError(shareAdd, err);
+  }
+}
+
+$('#share-collection').addEventListener('click', async () => {
+  setError(shareAdd, '');
+  await renderShareDialog();
+  shareDialog.showModal();
+});
+shareAdd.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { contact, role } = shareAdd.elements;
+  if (!contact.value) return;
+  setError(shareAdd, '');
+  await share(contact.value, role.value);
+  toast('Shared. It arrives on their devices when you are both online.');
+});
+shareDialog.addEventListener('click', (e) => {
+  if (e.target.dataset?.action === 'close') shareDialog.close();
+});
+
+// --- devices -------------------------------------------------------------------------------------
+
+const devicesDialog = $('#devices-dialog');
+
+async function renderDevices() {
+  const list = await invoke('devices');
+  const status = await invoke('sync_status');
+  const seen = new Map(status.peers.map((p) => [p.node_id, p]));
+  $('[data-devices]', devicesDialog).replaceChildren(
+    ...list
+      .sort((a, b) => Number(b.this_device) - Number(a.this_device) || a.name.localeCompare(b.name))
+      .map((d) => {
+        const peer = seen.get(d.node_id);
+        const sub = d.this_device ? 'This device' : peer ? (peer.ok ? 'Online, in sync' : 'Offline') : 'Not seen yet';
+        const name = h('div', { text: d.name });
+        const who = h('div', { class: 'who' }, name, h('div', { class: 'sub', text: sub }));
+        const rename = h('button', {
+          text: 'Rename',
+          onclick: () => {
+            const input = h('input', { value: d.name });
+            const save = async () => {
+              try {
+                await invoke('rename_device', { nodeId: d.node_id, name: input.value });
+                await renderDevices();
+              } catch (err) {
+                toast(String(err));
+              }
+            };
+            input.addEventListener('keydown', (ev) => ev.key === 'Enter' && save());
+            name.replaceWith(input);
+            rename.replaceWith(h('button', { text: 'Save', onclick: save }));
+            input.focus();
+          },
+        });
+        const remove = d.this_device
+          ? null
+          : h('button', {
+              class: 'danger',
+              text: 'Remove',
+              onclick: async () => {
+                devicesDialog.close();
+                const ok = await confirmDialog(`Remove "${d.name}"? It stops syncing. Its copy of the vault stays encrypted with your master password.`, 'Remove');
+                devicesDialog.showModal();
+                if (!ok) return;
+                await invoke('remove_device', { nodeId: d.node_id });
+                await renderDevices();
+              },
+            });
+        return h('li', {}, who, rename, remove);
+      }),
+  );
+}
+
+function resetPairing() {
+  $('[data-request]', devicesDialog).hidden = true;
+  $('[data-pairing]', devicesDialog).hidden = true;
+  $('[data-pair-start]', devicesDialog).hidden = false;
+  $('[data-ticket]', devicesDialog).value = '';
+  $('[data-qr]', devicesDialog).removeAttribute('src');
+}
+
+$('#open-devices').addEventListener('click', async () => {
+  resetPairing();
+  await renderDevices();
+  devicesDialog.showModal();
+});
+
+devicesDialog.addEventListener('click', async (e) => {
+  const action = e.target.dataset?.action;
+  if (action === 'close') devicesDialog.close();
+  if (action === 'pair') {
+    await busy(e.target, async () => {
+      try {
+        e.target.textContent = 'Preparing…';
+        const t = await invoke('start_pairing');
+        $('[data-ticket]', devicesDialog).value = t.ticket;
+        if (t.qr_svg) $('[data-qr]', devicesDialog).src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t.qr_svg);
+        $('[data-pair-wait]', devicesDialog).textContent = 'Waiting for the other device…';
+        $('[data-pairing]', devicesDialog).hidden = false;
+        $('[data-pair-start]', devicesDialog).hidden = true;
+      } catch (err) {
+        toast(String(err));
+      } finally {
+        e.target.textContent = 'Pair new device';
+      }
+    });
+  }
+  if (action === 'copy-ticket') {
+    await invoke('copy_text', { text: $('[data-ticket]', devicesDialog).value });
+    toast('Pairing code copied');
+  }
+  if (action === 'cancel-pair') {
+    await invoke('cancel_pairing');
+    resetPairing();
+  }
+  if (action === 'accept-pair') await answerPairing(true);
+  if (action === 'reject-pair') await answerPairing(false);
+});
+devicesDialog.addEventListener('close', () => {
+  if (!$('[data-pairing]', devicesDialog).hidden) invoke('cancel_pairing');
+});
+
+// --- contacts ------------------------------------------------------------------------------------
+
+const contactsDialog = $('#contacts-dialog');
+const contactForm = $('[data-add-contact]', contactsDialog);
+let myCard = '';
+
+function resetContactForm() {
+  contactForm.reset();
+  setError(contactForm, '');
+  $('[data-preview]', contactForm).hidden = true;
+  $('[data-submit]', contactForm).textContent = 'Check card';
+}
+
+async function renderContacts() {
+  const me = await invoke('profile');
+  myCard = me.card;
+  $('[data-my-fp]', contactsDialog).textContent = me.fingerprint;
+  const list = await invoke('contacts');
+  $('[data-contacts]', contactsDialog).replaceChildren(
+    ...list.map((c) =>
+      h(
+        'li',
+        {},
+        h('div', { class: 'who' }, h('div', { text: c.name }), h('div', { class: 'sub mono', text: c.fingerprint })),
+        h('button', {
+          class: 'danger',
+          text: 'Remove',
+          onclick: async () => {
+            contactsDialog.close();
+            const ok = await confirmDialog(`Remove ${c.name} from your contacts? Collections you shared stay shared until you remove them there.`, 'Remove');
+            contactsDialog.showModal();
+            if (!ok) return;
+            await invoke('remove_contact', { userId: c.user_id });
+            await renderContacts();
+          },
+        }),
+      ),
+    ),
+  );
+}
+
+$('#open-contacts').addEventListener('click', async () => {
+  resetContactForm();
+  await renderContacts();
+  contactsDialog.showModal();
+});
+
+contactForm.elements.card.addEventListener('input', () => {
+  $('[data-preview]', contactForm).hidden = true;
+  $('[data-submit]', contactForm).textContent = 'Check card';
+});
+
+contactForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const card = contactForm.elements.card.value;
+  setError(contactForm, '');
+  try {
+    if ($('[data-preview]', contactForm).hidden) {
+      const c = await invoke('preview_contact', { card });
+      $('[data-name]', contactForm).textContent = c.name;
+      $('[data-fp]', contactForm).textContent = c.fingerprint;
+      $('[data-preview]', contactForm).hidden = false;
+      $('[data-submit]', contactForm).textContent = 'Add contact';
+    } else {
+      await invoke('add_contact', { card });
+      resetContactForm();
+      await renderContacts();
+      toast('Contact added');
+    }
+  } catch (err) {
+    setError(contactForm, err);
+  }
+});
+
+contactsDialog.addEventListener('click', async (e) => {
+  const action = e.target.dataset?.action;
+  if (action === 'close') contactsDialog.close();
+  if (action === 'copy-card') {
+    await invoke('copy_text', { text: myCard });
+    toast('Contact card copied. Send it to the person you want to share with.');
+  }
+});
+
+// --- sync status & live updates ----------------------------------------------------------------
+
+let lastStatus = null;
+
+function renderSyncStatus(s) {
+  lastStatus = s;
+  const el = $('#sync-status');
+  el.classList.remove('ok', 'warn');
+  const text = $('[data-text]', el);
+  if (!s || !s.online) return (text.textContent = s ? 'Offline' : '');
+  const reachable = s.peers.filter((p) => p.ok).length;
+  if (s.peers.length === 0) {
+    text.textContent = 'Only this device';
+  } else if (reachable > 0) {
+    el.classList.add('ok');
+    text.textContent = `Synced ${s.last_sync ? timeAgo(s.last_sync) : ''} · ${reachable}/${s.peers.length} online`;
+  } else {
+    el.classList.add('warn');
+    text.textContent = 'Other devices offline';
+  }
+}
+
+$('#sync-status').addEventListener('click', () => {
+  invoke('sync_now');
+  $('[data-text]', $('#sync-status')).textContent = 'Syncing…';
+});
+setInterval(() => state.unlocked && lastStatus && renderSyncStatus(lastStatus), 30_000);
+
+listen('sync-status', async () => {
+  if (state.unlocked) renderSyncStatus(await invoke('sync_status'));
+});
+listen('vault-changed', async () => {
+  if (!state.unlocked) return;
+  await refresh();
+  if (shareDialog.open) await renderShareDialog();
+  if (devicesDialog.open) await renderDevices();
+  if (contactsDialog.open) await renderContacts();
+});
+listen('join-code', (e) => {
+  $('[data-code]', joinForm).textContent = e.payload;
+  $('[data-join-code]', joinForm).hidden = false;
+  $('[data-submit]', joinForm).textContent = 'Waiting for confirmation…';
+});
+
+let pendingPair = null;
+listen('pair-request', async (e) => {
+  pendingPair = e.payload;
+  if (!devicesDialog.open) {
+    for (const d of document.querySelectorAll('dialog[open]')) d.close();
+    await renderDevices();
+    devicesDialog.showModal();
+  }
+  $('[data-pairing]', devicesDialog).hidden = false;
+  $('[data-pair-start]', devicesDialog).hidden = true;
+  $('[data-req-name]', devicesDialog).textContent = pendingPair.name;
+  $('[data-req-code]', devicesDialog).textContent = pendingPair.code;
+  $('[data-request]', devicesDialog).hidden = false;
+  $('[data-pair-wait]', devicesDialog).textContent = 'Device connected, waiting for your confirmation.';
+});
+
+async function answerPairing(accept) {
+  if (!pendingPair) return;
+  const req = pendingPair;
+  pendingPair = null;
+  $('[data-request]', devicesDialog).hidden = true;
+  try {
+    await invoke('confirm_pairing', { nodeId: req.node_id, accept });
+    if (!accept) {
+      resetPairing();
+      toast('Pairing rejected. Start again for a new code.');
+    } else {
+      $('[data-pair-wait]', devicesDialog).textContent = 'Sending your vault…';
+    }
+  } catch (err) {
+    resetPairing();
+    toast(String(err));
+  }
+}
+
+listen('paired', async (e) => {
+  toast(`Paired "${e.payload}"`);
+  if (devicesDialog.open) {
+    resetPairing();
+    await renderDevices();
+  }
+});
+
 // --- keyboard shortcuts ------------------------------------------------------------------------
 
 window.addEventListener('keydown', (e) => {
@@ -518,7 +952,7 @@ window.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const k = e.key.toLowerCase();
   if (k === 'f') { e.preventDefault(); $('#search').focus(); }
-  if (k === 'n') { e.preventDefault(); openEntryDialog(); }
+  if (k === 'n') { e.preventDefault(); if (!$('#new-entry').disabled) openEntryDialog(); }
   if (k === 'l') { e.preventDefault(); lock(); }
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if (k === 'c' && state.entry && !typing && !window.getSelection()?.toString()) { e.preventDefault(); copy(state.entry, 'password'); }
