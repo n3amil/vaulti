@@ -1,6 +1,8 @@
 // Vaulti UI. Plain JS, no build step. All user data is rendered with
 // textContent (never innerHTML) — this is a password manager.
 
+import { t, translateError, translatePage, setRich, lang, langPref, setLangPref, LANGUAGES } from './i18n.js';
+
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -42,7 +44,7 @@ function show(name) {
 let toastTimer;
 function toast(msg) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.textContent = translateError(msg);
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 2200);
@@ -50,7 +52,7 @@ function toast(msg) {
 
 function setError(root, msg) {
   const el = $('[data-error]', root);
-  if (el) el.textContent = msg || '';
+  if (el) el.textContent = msg ? translateError(msg) : '';
 }
 
 async function busy(button, fn) {
@@ -62,7 +64,7 @@ async function busy(button, fn) {
   }
 }
 
-function confirmDialog(message, okLabel = 'Delete') {
+function confirmDialog(message, okLabel = t('Delete')) {
   const d = $('#confirm-dialog');
   $('[data-message]', d).textContent = message;
   $('[data-ok]', d).textContent = okLabel;
@@ -83,18 +85,19 @@ const collectionById = (id) => state.overview?.collections.find((c) => c.id === 
 const collectionName = (id) => collectionById(id)?.name ?? '';
 const canWrite = (c) => c && (c.my_role === 'owner' || c.my_role === 'editor');
 const writableCollections = () => state.overview.collections.filter(canWrite);
-const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' };
 
 function timeAgo(secs) {
   const d = Math.max(0, Math.round(Date.now() / 1000 - secs));
-  if (d < 60) return 'just now';
-  if (d < 3600) return `${Math.floor(d / 60)} min ago`;
-  return new Date(secs * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d < 60) return t('just now');
+  if (d < 3600) return t('{n} min ago', { n: Math.floor(d / 60) });
+  return new Date(secs * 1000).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' });
 }
 
 // --- auth flows ----------------------------------------------------------------
 
 async function boot() {
+  translatePage();
+  renderLanguageSelect();
   state.platform = await invoke('platform');
   document.documentElement.dataset.platform = state.platform;
   document.documentElement.dataset.mobile = String(isMobile());
@@ -126,12 +129,13 @@ $('#setup-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
   const { password, repeat } = form.elements;
-  if (password.value !== repeat.value) return setError(form, 'Passwords do not match');
+  if (password.value !== repeat.value) return setError(form, t('Passwords do not match'));
   setError(form, '');
   await busy(form.querySelector('[type=submit]'), async () => {
     try {
       const code = await invoke('create_vault', { password: password.value });
       form.reset();
+      await localizeDefaultCollection();
       showBackup(code, enterMain);
     } catch (err) {
       setError(form, err);
@@ -162,9 +166,10 @@ const isMobile = () => state.platform === 'android' || state.platform === 'ios';
 
 // On phones you start from the desktop: setup is "scan the desktop's QR code".
 function setupMobile() {
-  $('#join-title').textContent = 'Pair with your computer';
-  $('#join-intro').textContent =
-    'Open Vaulti on your computer, go to Devices → Pair new device and scan the QR code. Both need to be online.';
+  $('#join-title').dataset.i18n = 'Pair with your computer';
+  $('#join-intro').dataset.i18n =
+    'Open Vaulti on your computer, go to **Devices → Pair new device** and scan the QR code. Both need to be online.';
+  translatePage($('#screen-join'));
   $('#scan-ticket').hidden = false;
   $('#back-to-setup').hidden = true;
 
@@ -180,7 +185,7 @@ async function scanQr() {
   const scanner = window.__TAURI__.barcodeScanner;
   if (scanner) {
     if ((await scanner.checkPermissions()) !== 'granted' && (await scanner.requestPermissions()) !== 'granted') {
-      throw new Error('Camera permission is needed to scan the code. You can paste it instead.');
+      throw new Error(t('Camera permission is needed to scan the code. You can paste it instead.'));
     }
     return (await scanner.scan({ windowed: false, formats: ['QR_CODE'] })).content;
   }
@@ -191,7 +196,7 @@ $('#scan-ticket').addEventListener('click', async () => {
   setError(joinForm, '');
   try {
     const content = await scanQr();
-    if (!content?.startsWith('vaulti-pair:')) throw new Error("That QR code isn't a Vaulti pairing code");
+    if (!content?.startsWith('vaulti-pair:')) throw new Error(t("That QR code isn't a Vaulti pairing code"));
     joinForm.elements.ticket.value = content;
     if (!joinForm.elements.device.value) joinForm.elements.device.value = state.platform === 'ios' ? 'iPhone' : 'Android';
     joinForm.requestSubmit();
@@ -229,7 +234,7 @@ let joinStep = 'ticket';
 function showJoinStep(step) {
   joinStep = step;
   for (const el of joinForm.querySelectorAll('[data-step]')) el.hidden = el.dataset.step !== step;
-  $('[data-submit]', joinForm).textContent = step === 'ticket' ? 'Connect' : 'Unlock';
+  $('[data-submit]', joinForm).textContent = step === 'ticket' ? t('Connect') : t('Unlock');
   setError(joinForm, '');
   show('join');
   (step === 'ticket' ? joinForm.elements.ticket : joinForm.elements.password).focus();
@@ -252,7 +257,7 @@ joinForm.addEventListener('submit', async (e) => {
   await busy($('[data-submit]', joinForm), async () => {
     try {
       if (joinStep === 'ticket') {
-        $('[data-submit]', joinForm).textContent = 'Connecting…';
+        $('[data-submit]', joinForm).textContent = t('Connecting…');
         try {
           await invoke('join_fetch', { ticket: f.ticket.value, deviceName: f.device.value });
         } finally {
@@ -263,10 +268,10 @@ joinForm.addEventListener('submit', async (e) => {
         await invoke('join_unlock', { password: f.password.value });
         joinForm.reset();
         await enterMain();
-        toast('This device is now paired');
+        toast(t('This device is now paired'));
       }
     } catch (err) {
-      if (joinStep === 'ticket') $('[data-submit]', joinForm).textContent = 'Connect';
+      if (joinStep === 'ticket') $('[data-submit]', joinForm).textContent = t('Connect');
       setError(joinForm, err);
     }
   });
@@ -279,7 +284,7 @@ $('#recover-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
   const { code, password, repeat } = form.elements;
-  if (password.value !== repeat.value) return setError(form, 'Passwords do not match');
+  if (password.value !== repeat.value) return setError(form, t('Passwords do not match'));
   setError(form, '');
   await busy(form.querySelector('[type=submit]'), async () => {
     try {
@@ -299,7 +304,7 @@ async function lock() {
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
   $('#entry-list').replaceChildren();
   $('#collection-list').replaceChildren();
-  $('#detail').replaceChildren(h('p', { class: 'muted empty', text: 'Select an entry' }));
+  $('#detail').replaceChildren(h('p', { class: 'muted empty', text: t('Select an entry') }));
   $('#search').value = '';
   renderSyncStatus(null);
   stopTotp();
@@ -353,7 +358,7 @@ function renderSidebar() {
             class: 'nav-item' + (c.id === state.collection ? ' active' : ''),
             onclick: () => selectCollection(c.id),
           },
-          h('span', { class: 'name' }, c.name, c.members.length > 1 ? h('span', { class: 'badge', text: 'shared' }) : null),
+          h('span', { class: 'name' }, c.name, c.members.length > 1 ? h('span', { class: 'badge', text: t('shared') }) : null),
           h('span', { class: 'count', text: c.count }),
         ),
       ),
@@ -371,16 +376,19 @@ function visibleEntries() {
 function renderList() {
   const rows = visibleEntries();
   const c = collectionById(state.collection);
-  $('#list-title').textContent = c ? c.name : 'All items';
+  $('#list-title').textContent = c ? c.name : t('All items');
   $('#edit-collection').hidden = c?.my_role !== 'owner';
   $('#share-collection').hidden = c?.my_role !== 'owner';
   const info = $('#collection-info');
   info.hidden = !c || c.members.length < 2;
-  if (c && c.my_role !== 'owner') info.textContent = `Shared by ${c.owner_name} · ${c.my_role === 'viewer' ? 'view only' : 'you can edit'}`;
-  else if (c) info.textContent = `Shared with ${c.members.filter((m) => !m.is_me).map((m) => m.name).join(', ')}`;
+  if (c && c.my_role !== 'owner') {
+    info.textContent = t(c.my_role === 'viewer' ? 'Shared by {name} · view only' : 'Shared by {name} · you can edit', { name: c.owner_name });
+  } else if (c) {
+    info.textContent = t('Shared with {names}', { names: c.members.filter((m) => !m.is_me).map((m) => m.name).join(', ') });
+  }
   $('#new-entry').disabled = c ? !canWrite(c) : writableCollections().length === 0;
   $('#empty-list').hidden = rows.length > 0;
-  $('#empty-list').textContent = state.query ? 'No matches.' : 'No entries yet.';
+  $('#empty-list').textContent = state.query ? t('No matches.') : t('No entries yet.');
   $('#entry-list').replaceChildren(
     ...rows.map((e) =>
       h(
@@ -421,13 +429,13 @@ async function selectEntry(id) {
 function clearDetail() {
   stopTotp();
   state.entry = null;
-  $('#detail').replaceChildren(h('p', { class: 'muted empty', text: 'Select an entry' }));
+  $('#detail').replaceChildren(h('p', { class: 'muted empty', text: t('Select an entry') }));
 }
 
 async function copy(id, field, label) {
   try {
     await invoke('copy_field', { id, field });
-    toast(field === 'password' || field === 'totp' ? `${field === 'totp' ? 'Code' : 'Password'} copied, clears in 30 s` : `${label} copied`);
+    toast(field === 'password' || field === 'totp' ? t(field === 'totp' ? 'Code copied, clears in 30 s' : 'Password copied, clears in 30 s') : t('{label} copied', { label }));
   } catch (err) {
     toast(String(err));
   }
@@ -471,11 +479,11 @@ async function renderDetail() {
   let revealed = false;
   const pwText = h('span', { class: 'mono', text: MASK });
   const revealBtn = h('button', {
-    text: 'Show',
+    text: t('Show'),
     onclick: () => {
       revealed = !revealed;
       pwText.textContent = revealed ? e.password : MASK;
-      revealBtn.textContent = revealed ? 'Hide' : 'Show';
+      revealBtn.textContent = revealed ? t('Hide') : t('Show');
     },
   });
 
@@ -484,43 +492,43 @@ async function renderDetail() {
 
   const fields = [];
   if (e.username) {
-    fields.push(field('Username', h('span', { text: e.username }), h('button', { text: 'Copy', onclick: () => copy(e.id, 'username', 'Username') })));
+    fields.push(field(t('Username'), h('span', { text: e.username }), h('button', { text: t('Copy'), onclick: () => copy(e.id, 'username', t('Username')) })));
   }
-  fields.push(field('Password', pwText, revealBtn, h('button', { text: 'Copy', onclick: () => copy(e.id, 'password') })));
+  fields.push(field(t('Password'), pwText, revealBtn, h('button', { text: t('Copy'), onclick: () => copy(e.id, 'password') })));
   if (e.totp) {
     const code = h('span', { class: 'totp-code', text: '··· ···' });
     const left = h('span', { class: 'totp-left' });
-    fields.push(field('One-time code', code, left, h('button', { text: 'Copy', onclick: () => copy(e.id, 'totp', 'Code') })));
+    fields.push(field(t('One-time code'), code, left, h('button', { text: t('Copy'), onclick: () => copy(e.id, 'totp') })));
     startTotp(e.id, code, left);
   }
-  if (e.url) fields.push(field('Website', h('span', { text: e.url }), h('button', { text: 'Copy', onclick: () => copy(e.id, 'url', 'Website') })));
-  if (e.notes) fields.push(field('Notes', h('span', { text: e.notes })));
+  if (e.url) fields.push(field(t('Website'), h('span', { text: e.url }), h('button', { text: t('Copy'), onclick: () => copy(e.id, 'url', t('Website')) })));
+  if (e.notes) fields.push(field(t('Notes'), h('span', { text: e.notes })));
 
   const writable = canWrite(collectionById(e.collection_id));
   $('#detail').replaceChildren(
-    h('button', { class: 'link mobile-only back', text: '‹ Back', onclick: backToList }),
+    h('button', { class: 'link mobile-only back', text: t('‹ Back'), onclick: backToList }),
     h('div', { class: 'detail-head' }, avatar(e.title), h('div', {}, h('h2', { text: e.title }), h('div', { class: 'muted', text: collectionName(e.collection_id) }))),
     ...fields,
     writable
       ? h(
           'div',
           { class: 'detail-actions' },
-          h('button', { text: 'Edit', onclick: () => openEntryDialog(e) }),
-          h('button', { class: 'danger', text: 'Delete', onclick: () => deleteEntry(e) }),
+          h('button', { text: t('Edit'), onclick: () => openEntryDialog(e) }),
+          h('button', { class: 'danger', text: t('Delete'), onclick: () => deleteEntry(e) }),
         )
-      : h('p', { class: 'muted small', text: 'View only: this collection is shared with you read-only.' }),
-    h('div', { class: 'meta', text: `Updated ${new Date(e.updated_at * 1000).toLocaleString()}` }),
+      : h('p', { class: 'muted small', text: t('View only: this collection is shared with you read-only.') }),
+    h('div', { class: 'meta', text: t('Updated {date}', { date: new Date(e.updated_at * 1000).toLocaleString(lang) }) }),
   );
 }
 
 async function deleteEntry(e) {
-  if (!(await confirmDialog(`Delete "${e.title}"? This can't be undone.`))) return;
+  if (!(await confirmDialog(t('Delete "{title}"? This can\'t be undone.', { title: e.title })))) return;
   try {
     await invoke('delete_entry', { id: e.id });
     state.entry = null;
     if ($('#screen-main').dataset.view === 'detail') backToList();
     await refresh();
-    toast('Entry deleted');
+    toast(t('Entry deleted'));
   } catch (err) {
     toast(String(err));
   }
@@ -537,9 +545,9 @@ function openEntryDialog(existing = null) {
   const f = entryForm.elements;
   entryForm.reset();
   setError(entryForm, '');
-  $('[data-title]', entryForm).textContent = existing ? 'Edit entry' : 'New entry';
+  $('[data-title]', entryForm).textContent = existing ? t('Edit entry') : t('New entry');
   f.password.type = 'password';
-  $('[data-action=reveal]', entryForm).textContent = 'Show';
+  $('[data-action=reveal]', entryForm).textContent = t('Show');
   $('[data-generator]', entryForm).hidden = true;
   applyGenPrefs();
 
@@ -573,7 +581,7 @@ entryForm.addEventListener('click', async (e) => {
   if (action === 'cancel') entryDialog.close();
   if (action === 'reveal') {
     pw.type = pw.type === 'password' ? 'text' : 'password';
-    e.target.textContent = pw.type === 'password' ? 'Show' : 'Hide';
+    e.target.textContent = pw.type === 'password' ? t('Show') : t('Hide');
   }
   if (action === 'generate') {
     const panel = $('[data-generator]', entryForm);
@@ -589,7 +597,7 @@ entryForm.addEventListener('click', async (e) => {
   if (action === 'use') {
     pw.value = genPreview;
     pw.type = 'text';
-    $('[data-action=reveal]', entryForm).textContent = 'Hide';
+    $('[data-action=reveal]', entryForm).textContent = t('Hide');
     $('[data-generator]', entryForm).hidden = true;
   }
   if (action === 'scan-totp') {
@@ -665,10 +673,10 @@ function readGenPrefs() {
 }
 
 function strengthLabel(bits) {
-  if (bits < 50) return ['weak', 'Weak'];
-  if (bits < 70) return ['fair', 'Fair'];
-  if (bits < 100) return ['strong', 'Strong'];
-  return ['great', 'Very strong'];
+  if (bits < 50) return ['weak', t('Weak')];
+  if (bits < 70) return ['fair', t('Fair')];
+  if (bits < 100) return ['strong', t('Strong')];
+  return ['great', t('Very strong')];
 }
 
 async function generatePreview() {
@@ -694,13 +702,13 @@ async function generatePreview() {
     out.textContent = g.value;
     const [cls, label] = strengthLabel(g.bits);
     strength.className = `strength ${cls}`;
-    strength.textContent = `${label} · ~${Math.round(g.bits)} bits`;
+    strength.textContent = t('{label} · ~{bits} bits', { label, bits: Math.round(g.bits) });
     $('[data-action=use]', entryForm).disabled = false;
   } catch (err) {
     genPreview = '';
     out.textContent = '';
     strength.className = 'strength weak';
-    strength.textContent = String(err);
+    strength.textContent = translateError(err);
     $('[data-action=use]', entryForm).disabled = true;
   }
 }
@@ -727,11 +735,11 @@ async function checkTotpField() {
   try {
     const label = await invoke('check_totp', { totp: value });
     if (mine !== totpCheck) return;
-    hint.textContent = label ? `✓ Valid (${label})` : '✓ Valid';
+    hint.textContent = label ? t('✓ Valid ({label})', { label }) : t('✓ Valid');
     hint.classList.remove('bad');
   } catch (err) {
     if (mine !== totpCheck) return;
-    hint.textContent = String(err).replace('malformed data: ', '');
+    hint.textContent = translateError(err);
     hint.classList.add('bad');
   }
 }
@@ -760,7 +768,7 @@ entryForm.addEventListener('submit', async (e) => {
       state.entry = id;
       if (state.collection && state.collection !== collectionId) state.collection = collectionId;
       await refresh();
-      toast(wasEditing ? 'Saved' : 'Entry added');
+      toast(wasEditing ? t('Saved') : t('Entry added'));
     } catch (err) {
       setError(entryForm, err);
     }
@@ -785,7 +793,7 @@ function openCollectionDialog(id = null) {
   editingCollection = id;
   collectionForm.reset();
   setError(collectionForm, '');
-  $('[data-title]', collectionForm).textContent = id ? 'Edit collection' : 'New collection';
+  $('[data-title]', collectionForm).textContent = id ? t('Edit collection') : t('New collection');
   $('[data-action=delete]', collectionForm).hidden = !id;
   if (id) collectionForm.elements.name.value = collectionName(id);
   collectionDialog.showModal();
@@ -801,13 +809,15 @@ collectionForm.addEventListener('click', async (e) => {
   if (action === 'delete') {
     const c = state.overview.collections.find((c) => c.id === editingCollection);
     collectionDialog.close();
-    const msg = c.count ? `Delete "${c.name}" and its ${c.count} entries? This can't be undone.` : `Delete "${c.name}"?`;
+    const msg = c.count
+      ? t('Delete "{name}" and its {n} entries? This can\'t be undone.', { name: c.name, n: c.count })
+      : t('Delete "{name}"?', { name: c.name });
     if (!(await confirmDialog(msg))) return;
     try {
       await invoke('delete_collection', { id: c.id });
       state.collection = null;
       await refresh();
-      toast('Collection deleted');
+      toast(t('Collection deleted'));
     } catch (err) {
       toast(String(err));
     }
@@ -842,6 +852,7 @@ $('#open-settings').addEventListener('click', async () => {
     setError($(id), '');
   }
   $('#profile-form').elements.name.value = (await invoke('profile')).name;
+  renderLanguageSelect();
   settingsDialog.showModal();
 });
 
@@ -849,7 +860,7 @@ $('#profile-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
     await invoke('set_profile_name', { name: e.target.elements.name.value });
-    toast('Name saved');
+    toast(t('Name saved'));
   } catch (err) {
     setError(e.target, err);
   }
@@ -862,36 +873,36 @@ $('#password-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
   const { password, repeat } = form.elements;
-  if (password.value !== repeat.value) return setError(form, 'Passwords do not match');
+  if (password.value !== repeat.value) return setError(form, t('Passwords do not match'));
   setError(form, '');
   await busy(form.querySelector('[type=submit]'), async () => {
     try {
       await invoke('change_password', { newPassword: password.value });
       form.reset();
-      toast('Master password changed');
+      toast(t('Master password changed'));
     } catch (err) {
       setError(form, err);
     }
   });
 });
 
-const BACKUP_FILTERS = [{ name: 'Vaulti backup', extensions: ['vaulti'] }];
+const backupFilters = () => [{ name: t('Vaulti backup'), extensions: ['vaulti'] }];
 
 $('#backup-export-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
   const { password, repeat } = form.elements;
-  if (password.value !== repeat.value) return setError(form, 'Passwords do not match');
+  if (password.value !== repeat.value) return setError(form, t('Passwords do not match'));
   setError(form, '');
   await busy(form.querySelector('[type=submit]'), async () => {
     try {
       const contents = await invoke('export_backup', { password: password.value });
       const date = new Date().toISOString().slice(0, 10);
-      const path = await window.__TAURI__.dialog.save({ defaultPath: `vaulti-backup-${date}.vaulti`, filters: BACKUP_FILTERS });
+      const path = await window.__TAURI__.dialog.save({ defaultPath: `vaulti-backup-${date}.vaulti`, filters: backupFilters() });
       if (!path) return;
       await window.__TAURI__.fs.writeTextFile(path, contents);
       form.reset();
-      toast('Backup saved');
+      toast(t('Backup saved'));
     } catch (err) {
       setError(form, err);
     }
@@ -904,13 +915,17 @@ $('#backup-import-form').addEventListener('submit', async (e) => {
   setError(form, '');
   await busy(form.querySelector('[type=submit]'), async () => {
     try {
-      const path = await window.__TAURI__.dialog.open({ multiple: false, directory: false, filters: BACKUP_FILTERS });
+      const path = await window.__TAURI__.dialog.open({ multiple: false, directory: false, filters: backupFilters() });
       if (!path) return;
       const contents = await window.__TAURI__.fs.readTextFile(path);
       const r = await invoke('import_backup', { contents, password: form.elements.password.value });
       form.reset();
       await refresh();
-      toast(`Imported ${r.entries_added} entries${r.entries_skipped ? `, ${r.entries_skipped} already there` : ''}`);
+      toast(
+        r.entries_skipped
+          ? t('Imported {n} entries, {skipped} already there', { n: r.entries_added, skipped: r.entries_skipped })
+          : t('Imported {n} entries', { n: r.entries_added }),
+      );
     } catch (err) {
       setError(form, err);
     }
@@ -919,7 +934,7 @@ $('#backup-import-form').addEventListener('submit', async (e) => {
 
 $('#rotate-code').addEventListener('click', async () => {
   settingsDialog.close();
-  if (!(await confirmDialog('Create a new backup code? Your current code will stop working.', 'Create new code'))) return;
+  if (!(await confirmDialog(t('Create a new backup code? Your current code will stop working.'), t('Create new code')))) return;
   try {
     const code = await invoke('rotate_backup_code');
     showBackup(code, () => show('main'));
@@ -936,15 +951,15 @@ const shareAdd = $('[data-add]', shareDialog);
 async function renderShareDialog() {
   const c = collectionById(state.collection);
   if (!c) return shareDialog.close();
-  $('[data-title]', shareDialog).textContent = `Share "${c.name}"`;
+  $('[data-title]', shareDialog).textContent = t('Share "{name}"', { name: c.name });
   $('[data-members]', shareDialog).replaceChildren(
     ...c.members.map((m) => {
-      const who = h('div', { class: 'who' }, h('div', { text: m.name + (m.is_me ? ' (you)' : '') }), h('div', { class: 'sub mono', text: m.fingerprint }));
-      if (m.role === 'owner') return h('li', {}, who, h('span', { class: 'muted small', text: 'Owner' }));
+      const who = h('div', { class: 'who' }, h('div', { text: m.is_me ? t('{name} (you)', { name: m.name }) : m.name }), h('div', { class: 'sub mono', text: m.fingerprint }));
+      if (m.role === 'owner') return h('li', {}, who, h('span', { class: 'muted small', text: t('Owner') }));
       const role = h('select', { onchange: (e) => share(m.user_id, e.target.value) },
-        h('option', { value: 'editor', text: 'Can edit' }), h('option', { value: 'viewer', text: 'Can view' }));
+        h('option', { value: 'editor', text: t('Can edit') }), h('option', { value: 'viewer', text: t('Can view') }));
       role.value = m.role;
-      return h('li', {}, who, role, h('button', { class: 'danger', text: 'Remove', onclick: () => unshare(m) }));
+      return h('li', {}, who, role, h('button', { class: 'danger', text: t('Remove'), onclick: () => unshare(m) }));
     }),
   );
   const members = new Set(c.members.map((m) => m.user_id));
@@ -953,10 +968,12 @@ async function renderShareDialog() {
   shareAdd.elements.contact.replaceChildren(...candidates.map((x) => h('option', { value: x.user_id, text: `${x.name} (${x.fingerprint})` })));
   $('[data-has-contacts]', shareDialog).hidden = candidates.length === 0;
   $('[data-no-contacts]', shareDialog).hidden = candidates.length > 0;
-  $('[data-no-contacts]', shareDialog).textContent =
+  setRich(
+    $('[data-no-contacts]', shareDialog),
     contacts.length === 0
-      ? 'Add people under Contacts first, then share with them here.'
-      : 'Everyone in your contacts is already a member.';
+      ? t('Add people under **Contacts** first, then share with them here.')
+      : t('Everyone in your contacts is already a member.'),
+  );
 }
 
 async function share(userId, role) {
@@ -970,7 +987,7 @@ async function share(userId, role) {
 }
 
 async function unshare(m) {
-  if (!(await confirmDialog(`Remove ${m.name} from this collection? They keep what they already synced.`, 'Remove'))) {
+  if (!(await confirmDialog(t('Remove {name} from this collection? They keep what they already synced.', { name: m.name }), t('Remove')))) {
     return shareDialog.showModal();
   }
   shareDialog.showModal();
@@ -978,7 +995,7 @@ async function unshare(m) {
     await invoke('unshare_collection', { id: state.collection, userId: m.user_id });
     await refresh();
     await renderShareDialog();
-    toast(`${m.name} removed`);
+    toast(t('{name} removed', { name: m.name }));
   } catch (err) {
     setError(shareAdd, err);
   }
@@ -995,7 +1012,7 @@ shareAdd.addEventListener('submit', async (e) => {
   if (!contact.value) return;
   setError(shareAdd, '');
   await share(contact.value, role.value);
-  toast('Shared. It arrives on their devices when you are both online.');
+  toast(t('Shared. It arrives on their devices when you are both online.'));
 });
 shareDialog.addEventListener('click', (e) => {
   if (e.target.dataset?.action === 'close') shareDialog.close();
@@ -1014,11 +1031,11 @@ async function renderDevices() {
       .sort((a, b) => Number(b.this_device) - Number(a.this_device) || a.name.localeCompare(b.name))
       .map((d) => {
         const peer = seen.get(d.node_id);
-        const sub = d.this_device ? 'This device' : peer ? (peer.ok ? 'Online, in sync' : 'Offline') : 'Not seen yet';
+        const sub = t(d.this_device ? 'This device' : peer ? (peer.ok ? 'Online, in sync' : 'Offline') : 'Not seen yet');
         const name = h('div', { text: d.name });
         const who = h('div', { class: 'who' }, name, h('div', { class: 'sub', text: sub }));
         const rename = h('button', {
-          text: 'Rename',
+          text: t('Rename'),
           onclick: () => {
             const input = h('input', { value: d.name });
             const save = async () => {
@@ -1031,7 +1048,7 @@ async function renderDevices() {
             };
             input.addEventListener('keydown', (ev) => ev.key === 'Enter' && save());
             name.replaceWith(input);
-            rename.replaceWith(h('button', { text: 'Save', onclick: save }));
+            rename.replaceWith(h('button', { text: t('Save'), onclick: save }));
             input.focus();
           },
         });
@@ -1039,10 +1056,13 @@ async function renderDevices() {
           ? null
           : h('button', {
               class: 'danger',
-              text: 'Remove',
+              text: t('Remove'),
               onclick: async () => {
                 devicesDialog.close();
-                const ok = await confirmDialog(`Remove "${d.name}"? It stops syncing. Its copy of the vault stays encrypted with your master password.`, 'Remove');
+                const ok = await confirmDialog(
+                  t('Remove "{name}"? It stops syncing. Its copy of the vault stays encrypted with your master password.', { name: d.name }),
+                  t('Remove'),
+                );
                 devicesDialog.showModal();
                 if (!ok) return;
                 await invoke('remove_device', { nodeId: d.node_id });
@@ -1074,23 +1094,23 @@ devicesDialog.addEventListener('click', async (e) => {
   if (action === 'pair') {
     await busy(e.target, async () => {
       try {
-        e.target.textContent = 'Preparing…';
+        e.target.textContent = t('Preparing…');
         const t = await invoke('start_pairing');
         $('[data-ticket]', devicesDialog).value = t.ticket;
         if (t.qr_svg) $('[data-qr]', devicesDialog).src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t.qr_svg);
-        $('[data-pair-wait]', devicesDialog).textContent = 'Waiting for the other device…';
+        $('[data-pair-wait]', devicesDialog).textContent = t('Waiting for the other device…');
         $('[data-pairing]', devicesDialog).hidden = false;
         $('[data-pair-start]', devicesDialog).hidden = true;
       } catch (err) {
         toast(String(err));
       } finally {
-        e.target.textContent = 'Pair new device';
+        e.target.textContent = t('Pair new device');
       }
     });
   }
   if (action === 'copy-ticket') {
     await invoke('copy_text', { text: $('[data-ticket]', devicesDialog).value });
-    toast('Pairing code copied');
+    toast(t('Pairing code copied'));
   }
   if (action === 'cancel-pair') {
     await invoke('cancel_pairing');
@@ -1113,7 +1133,7 @@ function resetContactForm() {
   contactForm.reset();
   setError(contactForm, '');
   $('[data-preview]', contactForm).hidden = true;
-  $('[data-submit]', contactForm).textContent = 'Check card';
+  $('[data-submit]', contactForm).textContent = t('Check card');
 }
 
 async function renderContacts() {
@@ -1129,10 +1149,13 @@ async function renderContacts() {
         h('div', { class: 'who' }, h('div', { text: c.name }), h('div', { class: 'sub mono', text: c.fingerprint })),
         h('button', {
           class: 'danger',
-          text: 'Remove',
+          text: t('Remove'),
           onclick: async () => {
             contactsDialog.close();
-            const ok = await confirmDialog(`Remove ${c.name} from your contacts? Collections you shared stay shared until you remove them there.`, 'Remove');
+            const ok = await confirmDialog(
+              t('Remove {name} from your contacts? Collections you shared stay shared until you remove them there.', { name: c.name }),
+              t('Remove'),
+            );
             contactsDialog.showModal();
             if (!ok) return;
             await invoke('remove_contact', { userId: c.user_id });
@@ -1152,7 +1175,7 @@ $('#open-contacts').addEventListener('click', async () => {
 
 contactForm.elements.card.addEventListener('input', () => {
   $('[data-preview]', contactForm).hidden = true;
-  $('[data-submit]', contactForm).textContent = 'Check card';
+  $('[data-submit]', contactForm).textContent = t('Check card');
 });
 
 contactForm.addEventListener('submit', async (e) => {
@@ -1165,12 +1188,12 @@ contactForm.addEventListener('submit', async (e) => {
       $('[data-name]', contactForm).textContent = c.name;
       $('[data-fp]', contactForm).textContent = c.fingerprint;
       $('[data-preview]', contactForm).hidden = false;
-      $('[data-submit]', contactForm).textContent = 'Add contact';
+      $('[data-submit]', contactForm).textContent = t('Add contact');
     } else {
       await invoke('add_contact', { card });
       resetContactForm();
       await renderContacts();
-      toast('Contact added');
+      toast(t('Contact added'));
     }
   } catch (err) {
     setError(contactForm, err);
@@ -1182,7 +1205,7 @@ contactsDialog.addEventListener('click', async (e) => {
   if (action === 'close') contactsDialog.close();
   if (action === 'copy-card') {
     await invoke('copy_text', { text: myCard });
-    toast('Contact card copied. Send it to the person you want to share with.');
+    toast(t('Contact card copied. Send it to the person you want to share with.'));
   }
 });
 
@@ -1195,22 +1218,22 @@ function renderSyncStatus(s) {
   const el = $('#sync-status');
   el.classList.remove('ok', 'warn');
   const text = $('[data-text]', el);
-  if (!s || !s.online) return (text.textContent = s ? 'Offline' : '');
+  if (!s || !s.online) return (text.textContent = s ? t('Offline') : '');
   const reachable = s.peers.filter((p) => p.ok).length;
   if (s.peers.length === 0) {
-    text.textContent = 'Only this device';
+    text.textContent = t('Only this device');
   } else if (reachable > 0) {
     el.classList.add('ok');
-    text.textContent = `Synced ${s.last_sync ? timeAgo(s.last_sync) : ''} · ${reachable}/${s.peers.length} online`;
+    text.textContent = t('Synced {ago} · {online}/{total} online', { ago: s.last_sync ? timeAgo(s.last_sync) : '', online: reachable, total: s.peers.length });
   } else {
     el.classList.add('warn');
-    text.textContent = 'Other devices offline';
+    text.textContent = t('Other devices offline');
   }
 }
 
 $('#sync-status').addEventListener('click', () => {
   invoke('sync_now');
-  $('[data-text]', $('#sync-status')).textContent = 'Syncing…';
+  $('[data-text]', $('#sync-status')).textContent = t('Syncing…');
 });
 setInterval(() => state.unlocked && lastStatus && renderSyncStatus(lastStatus), 30_000);
 
@@ -1227,7 +1250,7 @@ listen('vault-changed', async () => {
 listen('join-code', (e) => {
   $('[data-code]', joinForm).textContent = e.payload;
   $('[data-join-code]', joinForm).hidden = false;
-  $('[data-submit]', joinForm).textContent = 'Waiting for confirmation…';
+  $('[data-submit]', joinForm).textContent = t('Waiting for confirmation…');
 });
 
 let pendingPair = null;
@@ -1243,7 +1266,7 @@ listen('pair-request', async (e) => {
   $('[data-req-name]', devicesDialog).textContent = pendingPair.name;
   $('[data-req-code]', devicesDialog).textContent = pendingPair.code;
   $('[data-request]', devicesDialog).hidden = false;
-  $('[data-pair-wait]', devicesDialog).textContent = 'Device connected, waiting for your confirmation.';
+  $('[data-pair-wait]', devicesDialog).textContent = t('Device connected, waiting for your confirmation.');
 });
 
 async function answerPairing(accept) {
@@ -1255,9 +1278,9 @@ async function answerPairing(accept) {
     await invoke('confirm_pairing', { nodeId: req.node_id, accept });
     if (!accept) {
       resetPairing();
-      toast('Pairing rejected. Start again for a new code.');
+      toast(t('Pairing rejected. Start again for a new code.'));
     } else {
-      $('[data-pair-wait]', devicesDialog).textContent = 'Sending your vault…';
+      $('[data-pair-wait]', devicesDialog).textContent = t('Sending your vault…');
     }
   } catch (err) {
     resetPairing();
@@ -1266,12 +1289,41 @@ async function answerPairing(accept) {
 }
 
 listen('paired', async (e) => {
-  toast(`Paired "${e.payload}"`);
+  toast(t('Paired "{name}"', { name: e.payload }));
   if (devicesDialog.open) {
     resetPairing();
     await renderDevices();
   }
 });
+
+// --- language -----------------------------------------------------------------------------------
+
+function renderLanguageSelect() {
+  const sel = $('#language');
+  sel.replaceChildren(
+    h('option', { value: 'auto', text: t('Automatic') }),
+    ...Object.entries(LANGUAGES).map(([code, name]) => h('option', { value: code, text: name })),
+  );
+  sel.value = langPref();
+}
+
+$('#language').addEventListener('change', async (e) => {
+  setLangPref(e.target.value);
+  renderLanguageSelect();
+  if (state.unlocked) {
+    await refresh();
+    renderSyncStatus(lastStatus);
+  }
+});
+
+// A new vault starts with one collection the core names in English.
+async function localizeDefaultCollection() {
+  const name = t('Personal');
+  if (name === 'Personal') return;
+  const { collections } = await invoke('overview');
+  const c = collections.find((c) => c.name === 'Personal');
+  if (c) await invoke('rename_collection', { id: c.id, name });
+}
 
 // --- keyboard shortcuts ------------------------------------------------------------------------
 
@@ -1287,5 +1339,5 @@ window.addEventListener('keydown', (e) => {
 });
 
 boot().catch((err) => {
-  document.body.replaceChildren(h('p', { class: 'error', text: `Failed to start: ${err}` }));
+  document.body.replaceChildren(h('p', { class: 'error', text: t('Failed to start: {err}', { err: translateError(err) }) }));
 });

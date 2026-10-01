@@ -24,6 +24,7 @@ collections can be shared with other users and organisations.
 - **Encrypted backups:** export everything to a `.vaulti` file protected by a backup password (Argon2id +
   XChaCha20-Poly1305); import into any vault, duplicates skipped
 - P2P device sync, pairing via QR + confirmation code, sharing collections (see below)
+- **Languages:** English and German (follows the system language, or pick one under Settings). Strings live in `app/ui/i18n.js`, English text is the key.
 
 Planned: CSV import/export (migration from Bitwarden/Vaultwarden and KeePassXC), organisations.
 

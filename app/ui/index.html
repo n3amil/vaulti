@@ -13,48 +13,48 @@
   <section id="screen-setup" class="screen center" hidden>
     <form class="card" id="setup-form">
       <img src="logo.svg" class="logo" alt="">
-      <h1>Create your vault</h1>
-      <p class="muted">Your master password encrypts everything. It never leaves this device.</p>
-      <label>Master password <input type="password" name="password" autocomplete="new-password" required minlength="8" autofocus></label>
-      <label>Repeat <input type="password" name="repeat" autocomplete="new-password" required></label>
+      <h1 data-i18n="Create your vault">Create your vault</h1>
+      <p class="muted" data-i18n="Your master password encrypts everything. It never leaves this device.">Your master password encrypts everything. It never leaves this device.</p>
+      <label><span data-i18n="Master password">Master password</span> <input type="password" name="password" autocomplete="new-password" required minlength="8" autofocus></label>
+      <label><span data-i18n="Repeat">Repeat</span> <input type="password" name="repeat" autocomplete="new-password" required></label>
       <p class="error" data-error></p>
-      <button class="primary" type="submit">Create vault</button>
-      <button type="button" class="link" id="go-join">I already use Vaulti on another device</button>
+      <button class="primary" type="submit" data-i18n="Create vault">Create vault</button>
+      <button type="button" class="link" id="go-join" data-i18n="I already use Vaulti on another device">I already use Vaulti on another device</button>
     </form>
   </section>
 
   <!-- Join from another device -->
   <section id="screen-join" class="screen center" hidden>
     <form class="card" id="join-form">
-      <h1 id="join-title">Add this device</h1>
+      <h1 id="join-title" data-i18n="Add this device">Add this device</h1>
       <div data-step="ticket">
-        <p class="muted" id="join-intro">On your other device open <b>Devices → Pair new device</b> and copy the pairing code here. Both devices need to be online.</p>
-        <button type="button" class="primary scan" id="scan-ticket" hidden>Scan QR code</button>
-        <label>Pairing code <textarea name="ticket" rows="4" class="mono" spellcheck="false" placeholder="vaulti-pair:…" autofocus></textarea></label>
-        <label>Name for this device <input name="device" autocomplete="off" placeholder="e.g. Work laptop"></label>
+        <p class="muted" id="join-intro" data-i18n="On your other device open **Devices → Pair new device** and copy the pairing code here. Both devices need to be online.">On your other device open <b>Devices → Pair new device</b> and copy the pairing code here. Both devices need to be online.</p>
+        <button type="button" class="primary scan" id="scan-ticket" hidden data-i18n="Scan QR code">Scan QR code</button>
+        <label><span data-i18n="Pairing code">Pairing code</span> <textarea name="ticket" rows="4" class="mono" spellcheck="false" placeholder="vaulti-pair:…" autofocus></textarea></label>
+        <label><span data-i18n="Name for this device">Name for this device</span> <input name="device" autocomplete="off" placeholder="e.g. Work laptop" data-i18n-placeholder="e.g. Work laptop"></label>
         <div class="join-code" data-join-code hidden>
-          <p class="muted">Confirm on your other device that it shows:</p>
+          <p class="muted" data-i18n="Confirm on your other device that it shows:">Confirm on your other device that it shows:</p>
           <div class="pair-code" data-code></div>
         </div>
       </div>
       <div data-step="password" hidden>
-        <p class="muted">Received your vault. Unlock it with your master password.</p>
-        <label>Master password <input type="password" name="password" autocomplete="current-password"></label>
+        <p class="muted" data-i18n="Received your vault. Unlock it with your master password.">Received your vault. Unlock it with your master password.</p>
+        <label><span data-i18n="Master password">Master password</span> <input type="password" name="password" autocomplete="current-password"></label>
       </div>
       <p class="error" data-error></p>
-      <button class="primary" type="submit" data-submit>Connect</button>
-      <button type="button" class="link" id="back-to-setup">Back</button>
+      <button class="primary" type="submit" data-submit data-i18n="Connect">Connect</button>
+      <button type="button" class="link" id="back-to-setup" data-i18n="Back">Back</button>
     </form>
   </section>
 
   <!-- Backup code display (after create / recover / rotate) -->
   <section id="screen-backup" class="screen center" hidden>
     <div class="card">
-      <h1>Your backup code</h1>
-      <p class="muted">If you forget your master password, this code is the only way back in. Write it down and keep it somewhere safe and offline. It will not be shown again.</p>
+      <h1 data-i18n="Your backup code">Your backup code</h1>
+      <p class="muted" data-i18n="If you forget your master password, this code is the only way back in. Write it down and keep it somewhere safe and offline. It will not be shown again.">If you forget your master password, this code is the only way back in. Write it down and keep it somewhere safe and offline. It will not be shown again.</p>
       <div class="backup-code" id="backup-code"></div>
-      <label class="check"><input type="checkbox" id="backup-ack"> I have written down my backup code</label>
-      <button class="primary" id="backup-done" disabled>Continue</button>
+      <label class="check"><input type="checkbox" id="backup-ack"> <span data-i18n="I have written down my backup code">I have written down my backup code</span></label>
+      <button class="primary" id="backup-done" disabled data-i18n="Continue">Continue</button>
     </div>
   </section>
 
@@ -62,135 +62,135 @@
   <section id="screen-lock" class="screen center" hidden>
     <form class="card" id="unlock-form">
       <img src="logo.svg" class="logo" alt="">
-      <h1>Vaulti is locked</h1>
-      <label>Master password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+      <h1 data-i18n="Vaulti is locked">Vaulti is locked</h1>
+      <label><span data-i18n="Master password">Master password</span> <input type="password" name="password" autocomplete="current-password" required autofocus></label>
       <p class="error" data-error></p>
-      <button class="primary" type="submit">Unlock</button>
-      <button type="button" class="link" id="go-recover">Forgot master password?</button>
+      <button class="primary" type="submit" data-i18n="Unlock">Unlock</button>
+      <button type="button" class="link" id="go-recover" data-i18n="Forgot master password?">Forgot master password?</button>
     </form>
   </section>
 
   <!-- Recover with backup code -->
   <section id="screen-recover" class="screen center" hidden>
     <form class="card" id="recover-form">
-      <h1>Recover vault</h1>
-      <p class="muted">Enter your backup code and choose a new master password. You will get a new backup code afterwards.</p>
-      <label>Backup code <input name="code" class="mono" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-…" required></label>
-      <label>New master password <input type="password" name="password" autocomplete="new-password" required minlength="8"></label>
-      <label>Repeat <input type="password" name="repeat" autocomplete="new-password" required></label>
+      <h1 data-i18n="Recover vault">Recover vault</h1>
+      <p class="muted" data-i18n="Enter your backup code and choose a new master password. You will get a new backup code afterwards.">Enter your backup code and choose a new master password. You will get a new backup code afterwards.</p>
+      <label><span data-i18n="Backup code">Backup code</span> <input name="code" class="mono" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-…" required></label>
+      <label><span data-i18n="New master password">New master password</span> <input type="password" name="password" autocomplete="new-password" required minlength="8"></label>
+      <label><span data-i18n="Repeat">Repeat</span> <input type="password" name="repeat" autocomplete="new-password" required></label>
       <p class="error" data-error></p>
-      <button class="primary" type="submit">Recover</button>
-      <button type="button" class="link" id="back-to-lock">Back</button>
+      <button class="primary" type="submit" data-i18n="Recover">Recover</button>
+      <button type="button" class="link" id="back-to-lock" data-i18n="Back">Back</button>
     </form>
   </section>
 
   <!-- Main -->
   <section id="screen-main" class="screen main" data-view="list" hidden>
     <nav class="sidebar">
-      <div class="brand"><img src="logo.svg" alt=""> Vaulti <button class="link mobile-only" id="close-nav">Done</button></div>
-      <button class="nav-item" data-collection="">All items <span class="count" id="count-all"></span></button>
-      <div class="nav-heading">Collections <button class="icon" id="new-collection" title="New collection">+</button></div>
+      <div class="brand"><img src="logo.svg" alt=""> Vaulti <button class="link mobile-only" id="close-nav" data-i18n="Done">Done</button></div>
+      <button class="nav-item" data-collection=""><span data-i18n="All items">All items</span> <span class="count" id="count-all"></span></button>
+      <div class="nav-heading"><span data-i18n="Collections">Collections</span> <button class="icon" id="new-collection" title="New collection" data-i18n-title="New collection">+</button></div>
       <div id="collection-list"></div>
       <div class="spacer"></div>
-      <button class="nav-item" id="open-devices">Devices</button>
-      <button class="nav-item" id="open-contacts">Contacts</button>
-      <button class="nav-item" id="open-settings">Settings</button>
-      <button class="nav-item" id="lock-now">Lock</button>
-      <button class="sync-status" id="sync-status" title="Sync now"><span class="dot"></span><span data-text>Starting…</span></button>
+      <button class="nav-item" id="open-devices" data-i18n="Devices">Devices</button>
+      <button class="nav-item" id="open-contacts" data-i18n="Contacts">Contacts</button>
+      <button class="nav-item" id="open-settings" data-i18n="Settings">Settings</button>
+      <button class="nav-item" id="lock-now" data-i18n="Lock">Lock</button>
+      <button class="sync-status" id="sync-status" title="Sync now" data-i18n-title="Sync now"><span class="dot"></span><span data-text data-i18n="Starting…">Starting…</span></button>
     </nav>
 
     <div class="list-pane">
       <div class="list-header">
-        <button class="icon mobile-only" id="open-nav" aria-label="Collections and menu">☰</button>
-        <input type="search" id="search" placeholder="Search" autocomplete="off" spellcheck="false">
-        <button class="primary" id="new-entry">New</button>
+        <button class="icon mobile-only" id="open-nav" aria-label="Collections and menu" data-i18n-aria-label="Collections and menu">☰</button>
+        <input type="search" id="search" placeholder="Search" data-i18n-placeholder="Search" autocomplete="off" spellcheck="false">
+        <button class="primary" id="new-entry" data-i18n="New">New</button>
       </div>
       <div class="list-title">
-        <h2 id="list-title">All items</h2>
+        <h2 id="list-title" data-i18n="All items">All items</h2>
         <span class="row">
-          <button class="link" id="share-collection" hidden>Share</button>
-          <button class="link" id="edit-collection" hidden>Edit</button>
+          <button class="link" id="share-collection" hidden data-i18n="Share">Share</button>
+          <button class="link" id="edit-collection" hidden data-i18n="Edit">Edit</button>
         </span>
       </div>
       <p class="collection-info muted small" id="collection-info" hidden></p>
       <ul id="entry-list" class="entry-list"></ul>
-      <p id="empty-list" class="muted empty" hidden>No entries yet.</p>
+      <p id="empty-list" class="muted empty" hidden data-i18n="No entries yet.">No entries yet.</p>
     </div>
 
     <div class="detail-pane" id="detail">
-      <p class="muted empty">Select an entry</p>
+      <p class="muted empty" data-i18n="Select an entry">Select an entry</p>
     </div>
   </section>
 
   <!-- Entry add/edit -->
   <dialog id="entry-dialog">
     <form method="dialog" id="entry-form">
-      <h2 data-title>New entry</h2>
-      <label>Title <input name="title" required autocomplete="off"></label>
-      <label>Username <input name="username" autocomplete="off" spellcheck="false"></label>
-      <label>Password
+      <h2 data-title data-i18n="New entry">New entry</h2>
+      <label><span data-i18n="Title">Title</span> <input name="title" required autocomplete="off"></label>
+      <label><span data-i18n="Username">Username</span> <input name="username" autocomplete="off" spellcheck="false"></label>
+      <label><span data-i18n="Password">Password</span>
         <span class="row">
           <input name="password" type="password" class="mono" autocomplete="off" spellcheck="false">
-          <button type="button" data-action="reveal">Show</button>
-          <button type="button" data-action="generate">Generate</button>
+          <button type="button" data-action="reveal" data-i18n="Show">Show</button>
+          <button type="button" data-action="generate" data-i18n="Generate">Generate</button>
         </span>
       </label>
       <div class="generator" data-generator hidden>
         <div class="seg" role="tablist">
-          <button type="button" data-mode="password">Password</button>
-          <button type="button" data-mode="passphrase">Passphrase</button>
+          <button type="button" data-mode="password" data-i18n="Password">Password</button>
+          <button type="button" data-mode="passphrase" data-i18n="Passphrase">Passphrase</button>
         </div>
         <div data-gen="password">
-          <label class="inline">Length <input type="range" name="g_length" min="8" max="64" value="20"> <output data-out="length">20</output></label>
+          <label class="inline"><span data-i18n="Length">Length</span> <input type="range" name="g_length" min="8" max="64" value="20"> <output data-out="length">20</output></label>
           <div class="checks">
             <label class="check"><input type="checkbox" name="g_upper" checked> A–Z</label>
             <label class="check"><input type="checkbox" name="g_lower" checked> a–z</label>
             <label class="check"><input type="checkbox" name="g_digits" checked> 0–9</label>
             <label class="check"><input type="checkbox" name="g_symbols" checked> !@#$%</label>
-            <label class="check"><input type="checkbox" name="g_ambiguous"> Avoid look-alikes (0 O 1 l I)</label>
+            <label class="check"><input type="checkbox" name="g_ambiguous"> <span data-i18n="Avoid look-alikes (0 O 1 l I)">Avoid look-alikes (0 O 1 l I)</span></label>
           </div>
         </div>
         <div data-gen="passphrase" hidden>
-          <label class="inline">Words <input type="range" name="g_words" min="3" max="10" value="5"> <output data-out="words">5</output></label>
-          <label class="inline">Separator
+          <label class="inline"><span data-i18n="Words">Words</span> <input type="range" name="g_words" min="3" max="10" value="5"> <output data-out="words">5</output></label>
+          <label class="inline"><span data-i18n="Separator">Separator</span>
             <select name="g_sep">
-              <option value="-">Hyphen  -</option>
-              <option value=" ">Space</option>
-              <option value=".">Period  .</option>
-              <option value="_">Underscore  _</option>
-              <option value="#">Hash  #</option>
-              <option value="">None</option>
-              <option value="custom">Custom…</option>
+              <option value="-" data-i18n="Hyphen  -">Hyphen  -</option>
+              <option value=" " data-i18n="Space">Space</option>
+              <option value="." data-i18n="Period  .">Period  .</option>
+              <option value="_" data-i18n="Underscore  _">Underscore  _</option>
+              <option value="#" data-i18n="Hash  #">Hash  #</option>
+              <option value="" data-i18n="None">None</option>
+              <option value="custom" data-i18n="Custom…">Custom…</option>
             </select>
             <input name="g_sep_custom" maxlength="3" placeholder="e.g. +" hidden>
           </label>
           <div class="checks">
-            <label class="check"><input type="checkbox" name="g_cap"> Capitalize words</label>
-            <label class="check"><input type="checkbox" name="g_num"> Add a number</label>
+            <label class="check"><input type="checkbox" name="g_cap"> <span data-i18n="Capitalize words">Capitalize words</span></label>
+            <label class="check"><input type="checkbox" name="g_num"> <span data-i18n="Add a number">Add a number</span></label>
           </div>
         </div>
         <div class="gen-preview mono" data-preview></div>
         <div class="row">
           <span class="strength" data-strength></span>
           <span class="spacer"></span>
-          <button type="button" data-action="regen">New</button>
-          <button type="button" class="primary" data-action="use">Use</button>
+          <button type="button" data-action="regen" data-i18n="New">New</button>
+          <button type="button" class="primary" data-action="use" data-i18n="Use">Use</button>
         </div>
       </div>
-      <label>One-time code (TOTP)
+      <label><span data-i18n="One-time code (TOTP)">One-time code (TOTP)</span>
         <span class="row">
-          <input name="totp" class="mono" autocomplete="off" spellcheck="false" placeholder="Secret or otpauth:// link">
-          <button type="button" class="phone-only" data-action="scan-totp">Scan</button>
+          <input name="totp" class="mono" autocomplete="off" spellcheck="false" placeholder="Secret or otpauth:// link" data-i18n-placeholder="Secret or otpauth:// link">
+          <button type="button" class="phone-only" data-action="scan-totp" data-i18n="Scan">Scan</button>
         </span>
         <span class="hint small" data-totp-hint></span>
       </label>
-      <label>Website <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="https://"></label>
-      <label>Collection <select name="collection"></select></label>
-      <label>Notes <textarea name="notes" rows="3"></textarea></label>
+      <label><span data-i18n="Website">Website</span> <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="https://"></label>
+      <label><span data-i18n="Collection">Collection</span> <select name="collection"></select></label>
+      <label><span data-i18n="Notes">Notes</span> <textarea name="notes" rows="3"></textarea></label>
       <p class="error" data-error></p>
       <div class="actions">
-        <button type="button" data-action="cancel">Cancel</button>
-        <button class="primary" type="submit">Save</button>
+        <button type="button" data-action="cancel" data-i18n="Cancel">Cancel</button>
+        <button class="primary" type="submit" data-i18n="Save">Save</button>
       </div>
     </form>
   </dialog>
@@ -198,14 +198,14 @@
   <!-- Collection add/rename -->
   <dialog id="collection-dialog">
     <form method="dialog" id="collection-form">
-      <h2 data-title>New collection</h2>
-      <label>Name <input name="name" required autocomplete="off"></label>
+      <h2 data-title data-i18n="New collection">New collection</h2>
+      <label><span data-i18n="Name">Name</span> <input name="name" required autocomplete="off"></label>
       <p class="error" data-error></p>
       <div class="actions">
-        <button type="button" class="danger" data-action="delete" hidden>Delete</button>
+        <button type="button" class="danger" data-action="delete" hidden data-i18n="Delete">Delete</button>
         <span class="spacer"></span>
-        <button type="button" data-action="cancel">Cancel</button>
-        <button class="primary" type="submit">Save</button>
+        <button type="button" data-action="cancel" data-i18n="Cancel">Cancel</button>
+        <button class="primary" type="submit" data-i18n="Save">Save</button>
       </div>
     </form>
   </dialog>
@@ -213,132 +213,136 @@
   <!-- Settings -->
   <dialog id="settings-dialog">
     <div class="settings">
-      <h2>Settings</h2>
+      <h2 data-i18n="Settings">Settings</h2>
+      <div>
+        <h3 data-i18n="Language">Language</h3>
+        <select id="language"></select>
+      </div>
       <form id="profile-form">
-        <h3>Your name</h3>
-        <p class="muted">Shown to people you share collections with.</p>
-        <span class="row"><input name="name" autocomplete="off" required><button type="submit">Save</button></span>
+        <h3 data-i18n="Your name">Your name</h3>
+        <p class="muted" data-i18n="Shown to people you share collections with.">Shown to people you share collections with.</p>
+        <span class="row"><input name="name" autocomplete="off" required><button type="submit" data-i18n="Save">Save</button></span>
         <p class="error" data-error></p>
       </form>
       <form id="password-form">
-        <h3>Change master password</h3>
-        <p class="muted">Your backup code stays the same.</p>
-        <label>New master password <input type="password" name="password" autocomplete="new-password" required minlength="8"></label>
-        <label>Repeat <input type="password" name="repeat" autocomplete="new-password" required></label>
+        <h3 data-i18n="Change master password">Change master password</h3>
+        <p class="muted" data-i18n="Your backup code stays the same.">Your backup code stays the same.</p>
+        <label><span data-i18n="New master password">New master password</span> <input type="password" name="password" autocomplete="new-password" required minlength="8"></label>
+        <label><span data-i18n="Repeat">Repeat</span> <input type="password" name="repeat" autocomplete="new-password" required></label>
         <p class="error" data-error></p>
-        <button type="submit">Change password</button>
+        <button type="submit" data-i18n="Change password">Change password</button>
       </form>
       <div>
-        <h3>Backup</h3>
-        <p class="muted">Save all collections and entries to a file encrypted with a backup password. Keep it somewhere safe, e.g. on a USB stick.</p>
+        <h3 data-i18n="Backup">Backup</h3>
+        <p class="muted" data-i18n="Save all collections and entries to a file encrypted with a backup password. Keep it somewhere safe, e.g. on a USB stick.">Save all collections and entries to a file encrypted with a backup password. Keep it somewhere safe, e.g. on a USB stick.</p>
         <form id="backup-export-form">
-          <label>Backup password <input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
-          <label>Repeat <input type="password" name="repeat" autocomplete="new-password" required></label>
+          <label><span data-i18n="Backup password">Backup password</span> <input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+          <label><span data-i18n="Repeat">Repeat</span> <input type="password" name="repeat" autocomplete="new-password" required></label>
           <p class="error" data-error></p>
-          <button type="submit">Export backup…</button>
+          <button type="submit" data-i18n="Export backup…">Export backup…</button>
         </form>
         <form id="backup-import-form">
-          <p class="muted small">Importing adds entries to collections with the same name; entries you already have are skipped.</p>
-          <label>Backup password <input type="password" name="password" autocomplete="off" required></label>
+          <p class="muted small" data-i18n="Importing adds entries to collections with the same name; entries you already have are skipped.">Importing adds entries to collections with the same name; entries you already have are skipped.</p>
+          <label><span data-i18n="Backup password">Backup password</span> <input type="password" name="password" autocomplete="off" required></label>
           <p class="error" data-error></p>
-          <button type="submit">Import backup…</button>
+          <button type="submit" data-i18n="Import backup…">Import backup…</button>
         </form>
       </div>
       <div>
-        <h3>Backup code</h3>
-        <p class="muted">Create a new backup code. Your current one stops working.</p>
-        <button id="rotate-code">New backup code</button>
+        <h3 data-i18n="Backup code">Backup code</h3>
+        <p class="muted" data-i18n="Create a new backup code. Your current one stops working.">Create a new backup code. Your current one stops working.</p>
+        <button id="rotate-code" data-i18n="New backup code">New backup code</button>
       </div>
       <div>
-        <h3>About</h3>
-        <p class="muted">Locks automatically after 5 minutes of inactivity. Copied passwords are cleared from the clipboard after 30 seconds.</p>
-        <p class="muted small">Vault file: <span id="vault-path" class="mono"></span></p>
+        <h3 data-i18n="About">About</h3>
+        <p class="muted" data-i18n="Locks automatically after 5 minutes of inactivity. Copied passwords are cleared from the clipboard after 30 seconds.">Locks automatically after 5 minutes of inactivity. Copied passwords are cleared from the clipboard after 30 seconds.</p>
+        <p class="muted small"><span data-i18n="Vault file:">Vault file:</span> <span id="vault-path" class="mono"></span></p>
       </div>
-      <div class="actions"><button data-action="close">Close</button></div>
+      <div class="actions"><button data-action="close" data-i18n="Close">Close</button></div>
     </div>
   </dialog>
 
   <!-- Share collection -->
   <dialog id="share-dialog">
     <div>
-      <h2 data-title>Share</h2>
-      <p class="muted">Members get the collection on their devices the next time you're both online.</p>
+      <h2 data-title data-i18n="Share">Share</h2>
+      <p class="muted" data-i18n="Members get the collection on their devices the next time you're both online.">Members get the collection on their devices the next time you're both online.</p>
       <ul class="member-list" data-members></ul>
       <form data-add>
-        <h3>Add someone</h3>
+        <h3 data-i18n="Add someone">Add someone</h3>
         <div data-has-contacts>
           <span class="row">
             <select name="contact"></select>
             <select name="role">
-              <option value="editor">Can edit</option>
-              <option value="viewer">Can view</option>
+              <option value="editor" data-i18n="Can edit">Can edit</option>
+              <option value="viewer" data-i18n="Can view">Can view</option>
             </select>
-            <button class="primary" type="submit">Add</button>
+            <button class="primary" type="submit" data-i18n="Add">Add</button>
           </span>
         </div>
-        <p class="muted" data-no-contacts hidden>Add people under <b>Contacts</b> first, then share with them here.</p>
+        <p class="muted" data-no-contacts hidden data-i18n="Add people under **Contacts** first, then share with them here.">Add people under <b>Contacts</b> first, then share with them here.</p>
         <p class="error" data-error></p>
       </form>
-      <p class="muted small">Removing someone stops future updates. They keep what they already received, so change those passwords if needed.</p>
-      <div class="actions"><button data-action="close">Done</button></div>
+      <p class="muted small" data-i18n="Removing someone stops future updates. They keep what they already received, so change those passwords if needed.">Removing someone stops future updates. They keep what they already received, so change those passwords if needed.</p>
+      <div class="actions"><button data-action="close" data-i18n="Done">Done</button></div>
     </div>
   </dialog>
 
   <!-- Devices -->
   <dialog id="devices-dialog" class="wide">
     <div>
-      <h2>Your devices</h2>
-      <p class="muted">Devices sync directly with each other whenever they're online at the same time.</p>
+      <h2 data-i18n="Your devices">Your devices</h2>
+      <p class="muted" data-i18n="Devices sync directly with each other whenever they're online at the same time.">Devices sync directly with each other whenever they're online at the same time.</p>
       <ul class="device-list" data-devices></ul>
       <div data-pair-start>
-        <button class="primary" data-action="pair">Pair new device</button>
+        <button class="primary" data-action="pair" data-i18n="Pair new device">Pair new device</button>
       </div>
       <div class="pairing" data-pairing hidden>
-        <h3>Pair a new device</h3>
-        <p class="muted">On the new device install Vaulti and choose <b>I already use Vaulti on another device</b>, then paste this code. It works once and expires in 10 minutes.</p>
+        <h3 data-i18n="Pair a new device">Pair a new device</h3>
+        <p class="muted" data-i18n="On the new device install Vaulti and choose **I already use Vaulti on another device**, then paste this code. It works once and expires in 10 minutes.">On the new device install Vaulti and choose <b>I already use Vaulti on another device</b>, then paste this code. It works once and expires in 10 minutes.</p>
         <div class="pairing-body">
-          <img data-qr alt="Pairing QR code">
+          <img data-qr alt="Pairing QR code" data-i18n-alt="Pairing QR code">
           <div class="pairing-code">
             <textarea data-ticket rows="6" class="mono" readonly></textarea>
-            <span class="row"><button data-action="copy-ticket">Copy code</button><button data-action="cancel-pair">Cancel</button></span>
-            <p class="muted small" data-pair-wait>Waiting for the other device…</p>
+            <span class="row"><button data-action="copy-ticket" data-i18n="Copy code">Copy code</button><button data-action="cancel-pair" data-i18n="Cancel">Cancel</button></span>
+            <p class="muted small" data-pair-wait data-i18n="Waiting for the other device…">Waiting for the other device…</p>
           </div>
         </div>
         <div class="pair-request" data-request hidden>
-          <p><b data-req-name></b> wants to join. Check that it shows this code:</p>
+          <p><b data-req-name></b> <span data-i18n="wants to join. Check that it shows this code:">wants to join. Check that it shows this code:</span></p>
           <div class="pair-code" data-req-code></div>
           <span class="row">
-            <button class="danger" data-action="reject-pair">Doesn't match</button>
-            <button class="primary" data-action="accept-pair">Codes match, pair</button>
+            <button class="danger" data-action="reject-pair" data-i18n="Doesn't match">Doesn't match</button>
+            <button class="primary" data-action="accept-pair" data-i18n="Codes match, pair">Codes match, pair</button>
           </span>
         </div>
       </div>
-      <div class="actions"><button data-action="close">Close</button></div>
+      <div class="actions"><button data-action="close" data-i18n="Close">Close</button></div>
     </div>
   </dialog>
 
   <!-- Contacts -->
   <dialog id="contacts-dialog" class="wide">
     <div>
-      <h2>Contacts</h2>
-      <p class="muted">People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.</p>
+      <h2 data-i18n="Contacts">Contacts</h2>
+      <p class="muted" data-i18n="People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.">People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.</p>
       <div class="my-card">
-        <h3>Your contact card</h3>
-        <p class="small">Fingerprint: <span class="mono" data-my-fp></span></p>
-        <button data-action="copy-card">Copy my card</button>
+        <h3 data-i18n="Your contact card">Your contact card</h3>
+        <p class="small"><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-my-fp></span></p>
+        <button data-action="copy-card" data-i18n="Copy my card">Copy my card</button>
       </div>
       <form data-add-contact>
-        <h3>Add a contact</h3>
+        <h3 data-i18n="Add a contact">Add a contact</h3>
         <textarea name="card" rows="3" class="mono" spellcheck="false" placeholder="vaulti-contact:…"></textarea>
         <div class="contact-preview" data-preview hidden>
-          <p><b data-name></b><br><span class="small">Fingerprint: <span class="mono" data-fp></span></span></p>
-          <p class="muted small">Check that this fingerprint matches what they see under Contacts → Your contact card.</p>
+          <p><b data-name></b><br><span class="small"><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-fp></span></span></p>
+          <p class="muted small" data-i18n="Check that this fingerprint matches what they see under Contacts → Your contact card.">Check that this fingerprint matches what they see under Contacts → Your contact card.</p>
         </div>
         <p class="error" data-error></p>
-        <span class="row"><button type="submit" class="primary" data-submit>Check card</button></span>
+        <span class="row"><button type="submit" class="primary" data-submit data-i18n="Check card">Check card</button></span>
       </form>
       <ul class="contact-list" data-contacts></ul>
-      <div class="actions"><button data-action="close">Close</button></div>
+      <div class="actions"><button data-action="close" data-i18n="Close">Close</button></div>
     </div>
   </dialog>
 
@@ -347,8 +351,8 @@
     <form method="dialog">
       <p data-message></p>
       <div class="actions">
-        <button value="no">Cancel</button>
-        <button value="yes" class="danger" data-ok>Delete</button>
+        <button value="no" data-i18n="Cancel">Cancel</button>
+        <button value="yes" class="danger" data-ok data-i18n="Delete">Delete</button>
       </div>
     </form>
   </dialog>
