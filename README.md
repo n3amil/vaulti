@@ -126,7 +126,11 @@ debug builds also honour `VAULTI_INSECURE_KDF=1`.
 
 - `ci.yml`: every push to `main` and every PR: fmt, clippy (`-D warnings`), all tests.
 - `release.yml`: push a tag `v*` (or run it manually): builds the .deb (same Docker build as
-  locally), then the Flatpak bundle, and attaches both to a draft GitHub release.
+  locally), the Flatpak, the Android APK and a universal macOS .dmg, and publishes a GitHub
+  release (tags like `v0.1.0-alpha.2` become pre-releases).
+- `android.yml`, `macos.yml`: also runnable on their own. APKs are signed with the key from the
+  `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` secrets; the macOS app is unsigned for now.
+- `ios.yml`: iOS simulator build on every app change (compile check, no Apple account needed).
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

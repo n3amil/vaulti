@@ -1,0 +1,59 @@
+name: iOS
+
+# Compile check: generates the Xcode project and builds the app for the iOS
+# simulator, unsigned (no Apple account needed). Installing on iPhones /
+# TestFlight needs an Apple Developer account and signing secrets (later).
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches: [main]
+    paths: ['app/**', 'core/**', 'sync/**', 'Cargo.lock', '.github/workflows/ios.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: aarch64-apple-ios-sim, aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ios
+
+      - name: Tools (XcodeGen generates the Xcode project)
+        run: brew install xcodegen
+
+      - name: Tauri CLI
+        working-directory: app
+        run: npm install
+
+      - name: Generate iOS project
+        working-directory: app
+        run: |
+          npx tauri ios init --ci
+          npx tauri icon icon.png
+
+      - name: Build for the simulator (unsigned)
+        working-directory: app/src-tauri/gen/apple
+        run: |
+          set -euo pipefail
+          PROJ=$(ls -d *.xcodeproj | head -1)
+          SCHEME=$(xcodebuild -list -json -project "$PROJ" | python3 -c 'import json,sys; s=json.load(sys.stdin)["project"]["schemes"]; print(next(x for x in s if x.endswith("_iOS")))')
+          echo "project=$PROJ scheme=$SCHEME"
+          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
+          find build -name '*.app' -maxdepth 5 | head -3

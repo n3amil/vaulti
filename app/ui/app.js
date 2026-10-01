@@ -97,11 +97,12 @@ function timeAgo(secs) {
 async function boot() {
   state.platform = await invoke('platform');
   document.documentElement.dataset.platform = state.platform;
-  if (state.platform === 'android') setupAndroid();
+  document.documentElement.dataset.mobile = String(isMobile());
+  if (isMobile()) setupMobile();
   const s = await invoke('status');
   $('#vault-path').textContent = s.path;
   if (s.pending_join) showJoinStep('password');
-  else if (!s.exists && state.platform === 'android') showJoinStep('ticket');
+  else if (!s.exists && isMobile()) showJoinStep('ticket');
   else if (!s.exists) show('setup');
   else if (!s.unlocked) show('lock');
   else await enterMain();
@@ -155,10 +156,12 @@ $('#unlock-form').addEventListener('submit', async (e) => {
   });
 });
 
-// --- Android ------------------------------------------------------------------------------
+// --- phones (Android, iOS) -----------------------------------------------------------------
 
-// On Android you start from the desktop: setup is "scan the desktop's QR code".
-function setupAndroid() {
+const isMobile = () => state.platform === 'android' || state.platform === 'ios';
+
+// On phones you start from the desktop: setup is "scan the desktop's QR code".
+function setupMobile() {
   $('#join-title').textContent = 'Pair with your computer';
   $('#join-intro').textContent =
     'Open Vaulti on your computer, go to Devices → Pair new device and scan the QR code. Both need to be online.';
@@ -190,7 +193,7 @@ $('#scan-ticket').addEventListener('click', async () => {
     const content = await scanQr();
     if (!content?.startsWith('vaulti-pair:')) throw new Error("That QR code isn't a Vaulti pairing code");
     joinForm.elements.ticket.value = content;
-    if (!joinForm.elements.device.value) joinForm.elements.device.value = 'Android';
+    if (!joinForm.elements.device.value) joinForm.elements.device.value = state.platform === 'ios' ? 'iPhone' : 'Android';
     joinForm.requestSubmit();
   } catch (err) {
     if (String(err) !== 'cancelled') setError(joinForm, err.message || String(err));

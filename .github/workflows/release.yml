@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v0.1.0 to build the .deb, .flatpak and Android APK and
+# Push a tag like v0.1.0 to build the .deb, .flatpak, macOS .dmg and Android APK and
 # publish a GitHub release. Tags with a suffix (v0.1.0-alpha.1) become
 # pre-releases. Run manually to just get the artifacts.
 on:
@@ -54,9 +54,12 @@ jobs:
       ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
 
+  macos:
+    uses: ./.github/workflows/macos.yml
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, flatpak, android]
+    needs: [deb, flatpak, android, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -69,6 +72,7 @@ jobs:
           cp artifacts/deb/*.deb out/
           find artifacts -name '*.flatpak' -exec cp {} out/ \;
           cp artifacts/android-apk/*.apk out/
+          cp artifacts/macos-dmg/*.dmg out/
           ls -lh out
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -82,6 +86,9 @@ jobs:
             - **Linux (Debian/Ubuntu):** `sudo apt install ./Vaulti_*_amd64.deb`
             - **Linux (Flatpak):** `flatpak install --user Vaulti.flatpak`
               (needs the GNOME 49 runtime from Flathub: `flatpak install flathub org.gnome.Platform//49`)
+            - **macOS (Apple Silicon & Intel):** open `Vaulti-macos-universal.dmg`, drag Vaulti to Applications.
+              Not signed yet: on first launch right-click Vaulti → Open (or run
+              `xattr -dr com.apple.quarantine /Applications/Vaulti.app`).
             - **Android (arm64):** download `Vaulti-android-arm64.apk` on the phone and open it
               (allow installing from your browser). Alpha builds may be test-signed: if an update
               won't install, uninstall the old version first.

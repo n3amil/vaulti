@@ -106,6 +106,12 @@ fn hostname() -> String {
     if cfg!(target_os = "android") {
         return "Android".into();
     }
+    if cfg!(target_os = "ios") {
+        return "iPhone".into();
+    }
+    if cfg!(target_os = "macos") {
+        return "Mac".into();
+    }
     std::fs::read_to_string("/etc/hostname")
         .ok()
         .map(|h| h.trim().to_string())
@@ -836,11 +842,13 @@ fn sync_now(state: State<AppState>) {
     state.kick.notify_one();
 }
 
-/// "desktop" or "android"; the UI adapts setup and layout.
+/// "desktop", "android" or "ios"; the UI adapts setup and layout.
 #[tauri::command]
 fn platform() -> &'static str {
     if cfg!(target_os = "android") {
         "android"
+    } else if cfg!(target_os = "ios") {
+        "ios"
     } else {
         "desktop"
     }
@@ -851,9 +859,9 @@ fn sync_status(state: State<AppState>) -> CmdResult<SyncStatus> {
     Ok(state.status.lock().map_err(err)?.clone())
 }
 
-/// Desktop keeps the CLI-compatible location; Android uses the app's private storage.
+/// Desktop keeps the CLI-compatible location; phones use the app's private storage.
 fn vault_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return Ok(app.path().app_data_dir()?.join("vault.json"));
     }
     Ok(dirs::data_dir().ok_or("no data directory")?.join("vaulti/vault.json"))

@@ -297,7 +297,7 @@ button.scan { width: 100%; margin: 12px 0 4px; padding: 12px; font-size: 16px; }
 }
 
 /* --- generator, TOTP, backup --- */
-html:not([data-platform="android"]) .android-only { display: none !important; }
+html:not([data-mobile="true"]) .phone-only { display: none !important; }
 
 .generator { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 8px; background: var(--code-bg); }
 .generator label.inline { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-weight: 500; }

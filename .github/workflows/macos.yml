@@ -1,0 +1,52 @@
+name: macOS
+
+# Universal (Apple Silicon + Intel) app as .dmg. Unsigned for now: on first
+# launch use right-click -> Open (signing/notarization needs an Apple
+# Developer account). Run manually; release.yml calls it for version tags.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: macos
+
+      - name: Tauri CLI
+        working-directory: app
+        run: npm install
+
+      - name: Build universal .app
+        working-directory: app
+        run: npx tauri build --ci --target universal-apple-darwin --bundles app
+
+      - name: Package .dmg
+        run: |
+          set -euo pipefail
+          APP=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          lipo -info "$APP/Contents/MacOS/"*
+          mkdir -p out dmg
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname Vaulti -srcfolder dmg -ov -format UDZO out/Vaulti-macos-universal.dmg
+          ls -lh out
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-dmg
+          path: out/*.dmg
+          if-no-files-found: error
