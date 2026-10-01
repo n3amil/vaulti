@@ -113,7 +113,7 @@ async fn pair_then_sync_both_ways() {
     );
 
     // Saved to disk on the receiving side.
-    let reloaded = Vault::unlock(store::load(&phone.shared.path).unwrap(), "password").unwrap();
+    let reloaded = Vault::unlock(store::load(phone.shared.path().unwrap()).unwrap(), "password").unwrap();
     assert_eq!(reloaded.entries().count(), 3);
 }
 

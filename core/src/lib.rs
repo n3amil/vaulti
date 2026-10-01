@@ -6,6 +6,7 @@
 pub mod account;
 mod b64;
 pub mod backup;
+mod clock;
 pub mod collection;
 pub mod crypto;
 pub mod error;

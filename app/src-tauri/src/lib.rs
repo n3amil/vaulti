@@ -86,7 +86,7 @@ impl AppState {
     }
 
     fn shared(&self) -> SharedVault {
-        SharedVault { vault: self.vault.clone(), path: self.path.clone() }
+        SharedVault::from_handle(self.vault.clone(), self.path.clone())
     }
 }
 

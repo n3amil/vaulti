@@ -22,10 +22,10 @@
 //! the local network, and addresses learned from pairing tickets. Relays only
 //! ever see QUIC-encrypted traffic, and vault data is additionally encrypted.
 
+use n0_future::time::{self, Duration, Instant};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -70,12 +70,42 @@ const TICKET_PREFIX: &str = "vaulti-pair:";
 #[derive(Clone)]
 pub struct SharedVault {
     pub vault: Arc<Mutex<Option<Vault>>>,
-    pub path: PathBuf,
+    saver: Saver,
 }
+
+/// Where a changed vault is written: a file, or (browser extension) a callback
+/// that puts the encrypted vault file into browser storage.
+#[derive(Clone)]
+enum Saver {
+    File(PathBuf),
+    Callback(Arc<SaveFn>),
+}
+
+type SaveFn = dyn Fn(&vaulti_core::VaultFile) -> Result<()> + Send + Sync;
 
 impl SharedVault {
     pub fn new(vault: Vault, path: PathBuf) -> Self {
-        Self { vault: Arc::new(Mutex::new(Some(vault))), path }
+        Self { vault: Arc::new(Mutex::new(Some(vault))), saver: Saver::File(path) }
+    }
+
+    /// Shares an existing vault handle (the app keeps its own reference).
+    pub fn from_handle(vault: Arc<Mutex<Option<Vault>>>, path: PathBuf) -> Self {
+        Self { vault, saver: Saver::File(path) }
+    }
+
+    pub fn with_saver(
+        vault: Vault,
+        save: impl Fn(&vaulti_core::VaultFile) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        Self { vault: Arc::new(Mutex::new(Some(vault))), saver: Saver::Callback(Arc::new(save)) }
+    }
+
+    /// The vault file, if saved to disk.
+    pub fn path(&self) -> Option<&PathBuf> {
+        match &self.saver {
+            Saver::File(p) => Some(p),
+            Saver::Callback(_) => None,
+        }
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut Vault) -> Result<R>) -> Result<R> {
@@ -84,7 +114,11 @@ impl SharedVault {
     }
 
     fn save(&self, v: &Vault) -> Result<()> {
-        store::save(&self.path, &v.to_file()?)?;
+        let file = v.to_file()?;
+        match &self.saver {
+            Saver::File(path) => store::save(path, &file)?,
+            Saver::Callback(save) => save(&file)?,
+        }
         Ok(())
     }
 }
@@ -223,6 +257,8 @@ async fn bind(secret: [u8; 32], network: Network) -> Result<(Endpoint, MemoryLoo
     let memory = MemoryLookup::new();
     let lookups = endpoint.address_lookup().map_err(|e| anyhow!("{e}"))?;
     lookups.add(memory.clone());
+    // Browsers can't do local-network discovery; there it's relays only.
+    #[cfg(not(target_arch = "wasm32"))]
     if network == Network::Internet {
         match iroh_mdns_address_lookup::MdnsAddressLookup::builder().build(endpoint.id()) {
             Ok(mdns) => lookups.add(mdns),
@@ -236,14 +272,14 @@ async fn bind(secret: [u8; 32], network: Network) -> Result<(Endpoint, MemoryLoo
 async fn wait_for_addr(endpoint: &Endpoint, network: Network) -> EndpointAddr {
     if network == Network::Internet {
         // A relay connection gives a reachable address even behind NAT.
-        let _ = tokio::time::timeout(Duration::from_secs(10), endpoint.online()).await;
+        let _ = time::timeout(Duration::from_secs(10), endpoint.online()).await;
     }
     for _ in 0..50 {
         let addr = endpoint.addr();
         if addr.ip_addrs().next().is_some() || addr.relay_urls().next().is_some() {
             return addr;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        time::sleep(Duration::from_millis(100)).await;
     }
     endpoint.addr()
 }
@@ -370,7 +406,7 @@ impl SyncNode {
         let id = parse_node_id(node_id)?;
         let report = match self.connect(id, SYNC2_ALPN).await {
             Ok(conn) => {
-                let result = tokio::time::timeout(EXCHANGE_TIMEOUT, self.exchange2(&conn, &peer)).await;
+                let result = time::timeout(EXCHANGE_TIMEOUT, self.exchange2(&conn, &peer)).await;
                 conn.close(0u32.into(), b"done");
                 result.map_err(|_| anyhow!("sync timed out"))??
             }
@@ -378,7 +414,7 @@ impl SyncNode {
             // the full exchange. (A timeout means offline; don't wait twice.)
             Err(e) if !is_timeout(&e) => {
                 let conn = self.connect(id, SYNC_ALPN).await?;
-                let result = tokio::time::timeout(EXCHANGE_TIMEOUT, self.exchange(&conn, &peer)).await;
+                let result = time::timeout(EXCHANGE_TIMEOUT, self.exchange(&conn, &peer)).await;
                 conn.close(0u32.into(), b"done");
                 result.map_err(|_| anyhow!("sync timed out"))??
             }
@@ -389,7 +425,7 @@ impl SyncNode {
     }
 
     async fn connect(&self, id: EndpointId, alpn: &[u8]) -> Result<Connection> {
-        Ok(tokio::time::timeout(CONNECT_TIMEOUT, self.endpoint().connect(id, alpn))
+        Ok(time::timeout(CONNECT_TIMEOUT, self.endpoint().connect(id, alpn))
             .await
             .map_err(|_| anyhow!(CONNECT_TIMED_OUT))??)
     }
@@ -422,7 +458,7 @@ impl SyncNode {
             Ok(t) => t.into_iter().map(|(id, _)| id).collect(),
             Err(e) => return vec![(String::new(), Err(e))],
         };
-        let mut set = tokio::task::JoinSet::new();
+        let mut set = n0_future::task::JoinSet::new();
         for id in targets {
             let node = self.clone();
             set.spawn(async move {
@@ -566,7 +602,7 @@ impl PairHandler {
         self.inner.confirmations.lock().map_err(|_| anyhow!("poisoned"))?.insert(node_id.clone(), tx);
         let code = pairing_code(&req.secret, &self.host, &joiner);
         let _ = self.inner.events.send(Event::PairRequest { node_id: node_id.clone(), name: name.clone(), code });
-        let accepted = matches!(tokio::time::timeout(CONFIRM_TIMEOUT, rx).await, Ok(Ok(true)));
+        let accepted = matches!(time::timeout(CONFIRM_TIMEOUT, rx).await, Ok(Ok(true)));
         if let Ok(mut c) = self.inner.confirmations.lock() {
             c.remove(&node_id);
         }
@@ -616,16 +652,15 @@ pub async fn join(
     let (endpoint, _memory) = bind(device_secret, network).await?;
     on_code(pairing_code(&ticket.secret, &ticket.addr.id, &endpoint.id()));
     let result = async {
-        let conn = tokio::time::timeout(CONNECT_TIMEOUT, endpoint.connect(ticket.addr.clone(), PAIR_ALPN))
+        let conn = time::timeout(CONNECT_TIMEOUT, endpoint.connect(ticket.addr.clone(), PAIR_ALPN))
             .await
             .map_err(|_| anyhow!("timed out connecting to the other device"))??;
         let (mut send, mut recv) = conn.open_bi().await?;
         let req = PairRequest { secret: ticket.secret.clone(), device_name: device_name.to_string() };
         send_json(&mut send, &req).await?;
-        let resp: PairResponse =
-            tokio::time::timeout(CONFIRM_TIMEOUT + CONNECT_TIMEOUT, recv_json(&mut recv, MAX_MESSAGE))
-                .await
-                .map_err(|_| anyhow!("timed out waiting for confirmation"))??;
+        let resp: PairResponse = time::timeout(CONFIRM_TIMEOUT + CONNECT_TIMEOUT, recv_json(&mut recv, MAX_MESSAGE))
+            .await
+            .map_err(|_| anyhow!("timed out waiting for confirmation"))??;
         conn.close(0u32.into(), b"done");
         match resp {
             PairResponse::Ok(file) => Ok(*file),

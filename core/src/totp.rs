@@ -155,7 +155,7 @@ impl Totp {
 
     /// Current code and seconds until it changes.
     pub fn now(&self) -> (String, u64) {
-        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let secs = crate::clock::since_epoch().map(|d| d.as_secs()).unwrap_or(0);
         (self.code_at(secs), self.period - secs % self.period)
     }
 }
