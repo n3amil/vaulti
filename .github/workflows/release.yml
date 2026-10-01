@@ -50,6 +50,9 @@ jobs:
 
   android:
     uses: ./.github/workflows/android.yml
+    secrets:
+      ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -79,8 +82,9 @@ jobs:
             - **Linux (Debian/Ubuntu):** `sudo apt install ./Vaulti_*_amd64.deb`
             - **Linux (Flatpak):** `flatpak install --user Vaulti.flatpak`
               (needs the GNOME 49 runtime from Flathub: `flatpak install flathub org.gnome.Platform//49`)
-            - **Android (arm64):** download `Vaulti-android-arm64-debug.apk` on the phone and open it
-              (allow installing from your browser). Debug-signed: to update, uninstall the old version first.
+            - **Android (arm64):** download `Vaulti-android-arm64.apk` on the phone and open it
+              (allow installing from your browser). Alpha builds may be test-signed: if an update
+              won't install, uninstall the old version first.
 
             ### Get started
             1. Create your vault on the computer. Write down the backup code.

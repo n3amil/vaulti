@@ -295,3 +295,30 @@ button.scan { width: 100%; margin: 12px 0 4px; padding: 12px; font-size: 16px; }
   .card { padding: 22px; border: none; background: transparent; }
   .center { align-items: flex-start; padding-top: max(24px, env(safe-area-inset-top)); }
 }
+
+/* --- generator, TOTP, backup --- */
+html:not([data-platform="android"]) .android-only { display: none !important; }
+
+.generator { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 8px; background: var(--code-bg); }
+.generator label.inline { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-weight: 500; }
+.generator label.inline input[type=range] { flex: 1; margin: 0; padding: 0; }
+.generator label.inline select, .generator label.inline input:not([type]) { width: auto; margin: 0; }
+.generator output { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.generator .checks { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+.generator .checks label { margin: 0; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; border-radius: 0; padding: 5px 14px; }
+.seg button.on { background: var(--accent); color: var(--accent-text); }
+.gen-preview { margin: 12px 0 8px; padding: 10px; border-radius: 6px; background: var(--panel); word-break: break-all; min-height: 2.6em; font-size: 15px; }
+.strength { font-size: 12px; font-weight: 600; }
+.strength.weak { color: var(--danger); }
+.strength.fair { color: var(--warn); }
+.strength.strong, .strength.great { color: var(--ok); }
+.hint { display: block; margin-top: 4px; font-weight: 400; color: var(--muted); }
+.hint.bad { color: var(--danger); }
+
+.totp-code { font: 600 18px ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; letter-spacing: .08em; }
+.totp-left { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3em; text-align: right; }
+.totp-left.soon { color: var(--warn); }
+#backup-export-form button, #backup-import-form button { margin-top: 10px; }
+#backup-import-form { margin-top: 14px; }

@@ -299,6 +299,7 @@ async function lock() {
   $('#detail').replaceChildren(h('p', { class: 'muted empty', text: 'Select an entry' }));
   $('#search').value = '';
   renderSyncStatus(null);
+  stopTotp();
   $('#screen-main').dataset.view = 'list';
   show('lock');
 }
@@ -415,6 +416,7 @@ async function selectEntry(id) {
 }
 
 function clearDetail() {
+  stopTotp();
   state.entry = null;
   $('#detail').replaceChildren(h('p', { class: 'muted empty', text: 'Select an entry' }));
 }
@@ -422,13 +424,46 @@ function clearDetail() {
 async function copy(id, field, label) {
   try {
     await invoke('copy_field', { id, field });
-    toast(field === 'password' ? 'Password copied, clears in 30 s' : `${label} copied`);
+    toast(field === 'password' || field === 'totp' ? `${field === 'totp' ? 'Code' : 'Password'} copied, clears in 30 s` : `${label} copied`);
   } catch (err) {
     toast(String(err));
   }
 }
 
+let totpTimer = null;
+function stopTotp() {
+  clearInterval(totpTimer);
+  totpTimer = null;
+}
+
+function startTotp(id, codeEl, leftEl) {
+  stopTotp();
+  let remaining = 0;
+  const fetchCode = async () => {
+    try {
+      const t = await invoke('totp_code', { id });
+      const c = t.code;
+      codeEl.textContent = c.length === 6 ? `${c.slice(0, 3)} ${c.slice(3)}` : c.length === 8 ? `${c.slice(0, 4)} ${c.slice(4)}` : c;
+      remaining = t.remaining;
+    } catch (err) {
+      codeEl.textContent = '—';
+      leftEl.textContent = '';
+      stopTotp();
+    }
+  };
+  const tick = async () => {
+    if (!document.body.contains(codeEl)) return stopTotp();
+    if (remaining <= 0) await fetchCode();
+    leftEl.textContent = `${remaining}s`;
+    leftEl.classList.toggle('soon', remaining <= 5);
+    remaining -= 1;
+  };
+  tick();
+  totpTimer = setInterval(tick, 1000);
+}
+
 async function renderDetail() {
+  stopTotp();
   const e = await invoke('get_entry', { id: state.entry });
   let revealed = false;
   const pwText = h('span', { class: 'mono', text: MASK });
@@ -449,6 +484,12 @@ async function renderDetail() {
     fields.push(field('Username', h('span', { text: e.username }), h('button', { text: 'Copy', onclick: () => copy(e.id, 'username', 'Username') })));
   }
   fields.push(field('Password', pwText, revealBtn, h('button', { text: 'Copy', onclick: () => copy(e.id, 'password') })));
+  if (e.totp) {
+    const code = h('span', { class: 'totp-code', text: '··· ···' });
+    const left = h('span', { class: 'totp-left' });
+    fields.push(field('One-time code', code, left, h('button', { text: 'Copy', onclick: () => copy(e.id, 'totp', 'Code') })));
+    startTotp(e.id, code, left);
+  }
   if (e.url) fields.push(field('Website', h('span', { text: e.url }), h('button', { text: 'Copy', onclick: () => copy(e.id, 'url', 'Website') })));
   if (e.notes) fields.push(field('Notes', h('span', { text: e.notes })));
 
@@ -496,6 +537,8 @@ function openEntryDialog(existing = null) {
   $('[data-title]', entryForm).textContent = existing ? 'Edit entry' : 'New entry';
   f.password.type = 'password';
   $('[data-action=reveal]', entryForm).textContent = 'Show';
+  $('[data-generator]', entryForm).hidden = true;
+  applyGenPrefs();
 
   f.collection.replaceChildren(
     ...writableCollections()
@@ -512,7 +555,9 @@ function openEntryDialog(existing = null) {
     f.password.value = existing.password;
     f.url.value = existing.url ?? '';
     f.notes.value = existing.notes ?? '';
+    f.totp.value = existing.totp ?? '';
   }
+  checkTotpField();
   entryDialog.showModal();
   f.title.focus();
 }
@@ -528,11 +573,166 @@ entryForm.addEventListener('click', async (e) => {
     e.target.textContent = pw.type === 'password' ? 'Show' : 'Hide';
   }
   if (action === 'generate') {
-    pw.value = await invoke('generate_password', { length: 20, symbols: true });
+    const panel = $('[data-generator]', entryForm);
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) await generatePreview();
+  }
+  if (e.target.dataset?.mode) {
+    genPrefs.mode = e.target.dataset.mode;
+    applyGenPrefs();
+    await generatePreview();
+  }
+  if (action === 'regen') await generatePreview();
+  if (action === 'use') {
+    pw.value = genPreview;
     pw.type = 'text';
     $('[data-action=reveal]', entryForm).textContent = 'Hide';
+    $('[data-generator]', entryForm).hidden = true;
+  }
+  if (action === 'scan-totp') {
+    try {
+      entryForm.elements.totp.value = await scanQr();
+      checkTotpField();
+    } catch (err) {
+      if (String(err) !== 'cancelled') setError(entryForm, err.message || String(err));
+    }
   }
 });
+
+// --- password / passphrase generator (settings remembered per device) ---
+
+const GEN_KEY = 'vaulti.generator';
+const GEN_DEFAULTS = {
+  mode: 'password', length: 20, upper: true, lower: true, digits: true, symbols: true, ambiguous: false,
+  words: 5, sep: '-', sepCustom: '', cap: false, num: false,
+};
+let genPrefs = { ...GEN_DEFAULTS };
+try {
+  genPrefs = { ...GEN_DEFAULTS, ...JSON.parse(localStorage.getItem(GEN_KEY) || '{}') };
+} catch {}
+let genPreview = '';
+
+function saveGenPrefs() {
+  try {
+    localStorage.setItem(GEN_KEY, JSON.stringify(genPrefs));
+  } catch {}
+}
+
+function applyGenPrefs() {
+  const f = entryForm.elements;
+  for (const b of entryForm.querySelectorAll('[data-mode]')) b.classList.toggle('on', b.dataset.mode === genPrefs.mode);
+  $('[data-gen=password]', entryForm).hidden = genPrefs.mode !== 'password';
+  $('[data-gen=passphrase]', entryForm).hidden = genPrefs.mode !== 'passphrase';
+  f.g_length.value = genPrefs.length;
+  f.g_upper.checked = genPrefs.upper;
+  f.g_lower.checked = genPrefs.lower;
+  f.g_digits.checked = genPrefs.digits;
+  f.g_symbols.checked = genPrefs.symbols;
+  f.g_ambiguous.checked = genPrefs.ambiguous;
+  f.g_words.value = genPrefs.words;
+  const known = [...f.g_sep.options].some((o) => o.value === genPrefs.sep);
+  f.g_sep.value = known ? genPrefs.sep : 'custom';
+  f.g_sep_custom.value = genPrefs.sepCustom;
+  f.g_sep_custom.hidden = f.g_sep.value !== 'custom';
+  f.g_cap.checked = genPrefs.cap;
+  f.g_num.checked = genPrefs.num;
+  $('[data-out=length]', entryForm).textContent = genPrefs.length;
+  $('[data-out=words]', entryForm).textContent = genPrefs.words;
+}
+
+function readGenPrefs() {
+  const f = entryForm.elements;
+  Object.assign(genPrefs, {
+    length: Number(f.g_length.value),
+    upper: f.g_upper.checked,
+    lower: f.g_lower.checked,
+    digits: f.g_digits.checked,
+    symbols: f.g_symbols.checked,
+    ambiguous: f.g_ambiguous.checked,
+    words: Number(f.g_words.value),
+    sep: f.g_sep.value === 'custom' ? f.g_sep_custom.value : f.g_sep.value,
+    sepCustom: f.g_sep_custom.value,
+    cap: f.g_cap.checked,
+    num: f.g_num.checked,
+  });
+  f.g_sep_custom.hidden = f.g_sep.value !== 'custom';
+  $('[data-out=length]', entryForm).textContent = genPrefs.length;
+  $('[data-out=words]', entryForm).textContent = genPrefs.words;
+  saveGenPrefs();
+}
+
+function strengthLabel(bits) {
+  if (bits < 50) return ['weak', 'Weak'];
+  if (bits < 70) return ['fair', 'Fair'];
+  if (bits < 100) return ['strong', 'Strong'];
+  return ['great', 'Very strong'];
+}
+
+async function generatePreview() {
+  const out = $('[data-preview]', entryForm);
+  const strength = $('[data-strength]', entryForm);
+  try {
+    const g =
+      genPrefs.mode === 'passphrase'
+        ? await invoke('generate_passphrase', {
+            spec: { words: genPrefs.words, separator: genPrefs.sep, capitalize: genPrefs.cap, include_number: genPrefs.num },
+          })
+        : await invoke('generate_password', {
+            spec: {
+              length: genPrefs.length,
+              lower: genPrefs.lower,
+              upper: genPrefs.upper,
+              digits: genPrefs.digits,
+              symbols: genPrefs.symbols,
+              avoid_ambiguous: genPrefs.ambiguous,
+            },
+          });
+    genPreview = g.value;
+    out.textContent = g.value;
+    const [cls, label] = strengthLabel(g.bits);
+    strength.className = `strength ${cls}`;
+    strength.textContent = `${label} · ~${Math.round(g.bits)} bits`;
+    $('[data-action=use]', entryForm).disabled = false;
+  } catch (err) {
+    genPreview = '';
+    out.textContent = '';
+    strength.className = 'strength weak';
+    strength.textContent = String(err);
+    $('[data-action=use]', entryForm).disabled = true;
+  }
+}
+
+for (const el of entryForm.querySelectorAll('[data-generator] input, [data-generator] select')) {
+  el.addEventListener('input', async () => {
+    readGenPrefs();
+    await generatePreview();
+  });
+}
+
+// --- TOTP field validation while typing ---
+
+let totpCheck = 0;
+async function checkTotpField() {
+  const hint = $('[data-totp-hint]', entryForm);
+  const value = entryForm.elements.totp.value.trim();
+  const mine = ++totpCheck;
+  if (!value) {
+    hint.textContent = '';
+    hint.classList.remove('bad');
+    return;
+  }
+  try {
+    const label = await invoke('check_totp', { totp: value });
+    if (mine !== totpCheck) return;
+    hint.textContent = label ? `✓ Valid (${label})` : '✓ Valid';
+    hint.classList.remove('bad');
+  } catch (err) {
+    if (mine !== totpCheck) return;
+    hint.textContent = String(err).replace('malformed data: ', '');
+    hint.classList.add('bad');
+  }
+}
+entryForm.elements.totp.addEventListener('input', checkTotpField);
 
 entryForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -543,6 +743,7 @@ entryForm.addEventListener('submit', async (e) => {
     password: f.password.value,
     url: f.url.value,
     notes: f.notes.value,
+    totp: f.totp.value,
   };
   const collectionId = f.collection.value;
   const wasEditing = editing;
@@ -565,6 +766,9 @@ entryForm.addEventListener('submit', async (e) => {
 
 entryDialog.addEventListener('close', () => {
   entryForm.elements.password.value = '';
+  entryForm.elements.totp.value = '';
+  genPreview = '';
+  $('[data-preview]', entryForm).textContent = '';
   editing = null;
 });
 
@@ -630,6 +834,10 @@ $('#open-settings').addEventListener('click', async () => {
   $('#password-form').reset();
   setError($('#password-form'), '');
   setError($('#profile-form'), '');
+  for (const id of ['#backup-export-form', '#backup-import-form']) {
+    $(id).reset();
+    setError($(id), '');
+  }
   $('#profile-form').elements.name.value = (await invoke('profile')).name;
   settingsDialog.showModal();
 });
@@ -658,6 +866,48 @@ $('#password-form').addEventListener('submit', async (e) => {
       await invoke('change_password', { newPassword: password.value });
       form.reset();
       toast('Master password changed');
+    } catch (err) {
+      setError(form, err);
+    }
+  });
+});
+
+const BACKUP_FILTERS = [{ name: 'Vaulti backup', extensions: ['vaulti'] }];
+
+$('#backup-export-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const { password, repeat } = form.elements;
+  if (password.value !== repeat.value) return setError(form, 'Passwords do not match');
+  setError(form, '');
+  await busy(form.querySelector('[type=submit]'), async () => {
+    try {
+      const contents = await invoke('export_backup', { password: password.value });
+      const date = new Date().toISOString().slice(0, 10);
+      const path = await window.__TAURI__.dialog.save({ defaultPath: `vaulti-backup-${date}.vaulti`, filters: BACKUP_FILTERS });
+      if (!path) return;
+      await window.__TAURI__.fs.writeTextFile(path, contents);
+      form.reset();
+      toast('Backup saved');
+    } catch (err) {
+      setError(form, err);
+    }
+  });
+});
+
+$('#backup-import-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  setError(form, '');
+  await busy(form.querySelector('[type=submit]'), async () => {
+    try {
+      const path = await window.__TAURI__.dialog.open({ multiple: false, directory: false, filters: BACKUP_FILTERS });
+      if (!path) return;
+      const contents = await window.__TAURI__.fs.readTextFile(path);
+      const r = await invoke('import_backup', { contents, password: form.elements.password.value });
+      form.reset();
+      await refresh();
+      toast(`Imported ${r.entries_added} entries${r.entries_skipped ? `, ${r.entries_skipped} already there` : ''}`);
     } catch (err) {
       setError(form, err);
     }

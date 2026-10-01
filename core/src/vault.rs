@@ -17,6 +17,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::account::{AccountDoc, Contact, ContactCard, Device, Lww};
+use crate::backup::{BackupCollection, BackupData, BackupEntry, ImportReport};
 use crate::collection::{
     aad_body, aad_key, sign_entry, sign_meta, CollectionDoc, CollectionRecord, EntryData, EntryVersion, KeyWrap,
     Member, Meta, Role,
@@ -349,6 +350,7 @@ impl Vault {
                     url: e.url,
                     notes: e.notes,
                     created_at: e.created_at,
+                    totp: None,
                 };
                 vault.put_entry(c.id, e.id, Some(data))?;
             }
@@ -702,6 +704,7 @@ impl Vault {
             url: input.url,
             notes: input.notes,
             created_at: now(),
+            totp: check_totp(input.totp)?,
         };
         self.put_entry(collection, id, Some(data))?;
         Ok(id)
@@ -717,6 +720,7 @@ impl Vault {
             url: input.url,
             notes: input.notes,
             created_at,
+            totp: check_totp(input.totp)?,
         };
         self.put_entry(cid, id, Some(data))
     }
@@ -726,6 +730,86 @@ impl Vault {
         let (cid, old) = (c.id, e.clone());
         self.put_entry(cid, id, None)?;
         Ok(old)
+    }
+
+    // --- backups -------------------------------------------------------------------
+
+    /// All visible collections and their entries, for an encrypted backup.
+    pub fn export_backup(&self) -> BackupData {
+        BackupData {
+            exported_at: now(),
+            collections: self
+                .collections()
+                .map(|c| BackupCollection {
+                    name: c.name.clone(),
+                    entries: c
+                        .entries
+                        .iter()
+                        .map(|e| BackupEntry {
+                            title: e.title.clone(),
+                            username: e.username.clone(),
+                            password: e.password.clone(),
+                            url: e.url.clone(),
+                            notes: e.notes.clone(),
+                            totp: e.totp.clone(),
+                            created_at: e.created_at,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Imports a backup: entries go into the writable collection with the same
+    /// name (created if missing); entries already there are skipped.
+    pub fn import_backup(&mut self, data: BackupData) -> Result<ImportReport> {
+        let mut report = ImportReport::default();
+        for bc in data.collections {
+            let existing =
+                self.collections().find(|c| c.can_write() && c.name.eq_ignore_ascii_case(&bc.name)).map(|c| c.id);
+            let cid = match existing {
+                Some(id) => id,
+                None => {
+                    report.collections_created += 1;
+                    self.create_collection(&bc.name)?
+                }
+            };
+            for be in bc.entries {
+                let current: Vec<BackupEntry> = self
+                    .collection(cid)
+                    .map(|c| {
+                        c.entries
+                            .iter()
+                            .map(|e| BackupEntry {
+                                title: e.title.clone(),
+                                username: e.username.clone(),
+                                password: e.password.clone(),
+                                url: e.url.clone(),
+                                notes: None,
+                                totp: None,
+                                created_at: 0,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if current.iter().any(|c| c.same_as(&be)) {
+                    report.entries_skipped += 1;
+                    continue;
+                }
+                let data = EntryData {
+                    title: be.title,
+                    username: be.username,
+                    password: be.password,
+                    url: be.url,
+                    notes: be.notes,
+                    created_at: be.created_at,
+                    totp: check_totp(be.totp).unwrap_or(None),
+                };
+                self.put_entry(cid, Uuid::new_v4(), Some(data))?;
+                report.entries_added += 1;
+            }
+        }
+        Ok(report)
     }
 
     // --- sync ----------------------------------------------------------------------
@@ -852,6 +936,17 @@ impl Vault {
     }
 }
 
+/// Normalizes an optional TOTP field: blank = none, otherwise it must parse.
+fn check_totp(totp: Option<String>) -> Result<Option<String>> {
+    match totp.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        Some(t) => {
+            crate::totp::Totp::parse(&t)?;
+            Ok(Some(t))
+        }
+        None => Ok(None),
+    }
+}
+
 fn build_view(id: Uuid, owner: &IdentityPublic, doc: &CollectionDoc, me: &UserId) -> Collection {
     let meta = &doc.meta.meta;
     let entries: Vec<Entry> = doc
@@ -868,6 +963,7 @@ fn build_view(id: Uuid, owner: &IdentityPublic, doc: &CollectionDoc, me: &UserId
                 notes: d.notes.clone(),
                 created_at: d.created_at,
                 updated_at: e.version.stamp.secs(),
+                totp: d.totp.clone(),
             })
         })
         .collect();

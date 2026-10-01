@@ -14,7 +14,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::Notify;
 use uuid::Uuid;
-use vaulti_core::generator::{self, PasswordSpec};
+use vaulti_core::generator::{self, PassphraseSpec, PasswordSpec};
+use vaulti_core::totp::Totp;
+use vaulti_core::{backup, backup::ImportReport};
 use vaulti_core::{store, BackupCode, ContactCard, Entry, EntryInput, KdfParams, Member, Role, UserId, Vault};
 use vaulti_sync::{Event, Network, SharedVault, SyncNode};
 use zeroize::Zeroizing;
@@ -319,6 +321,22 @@ struct EntryForm {
     password: String,
     url: Option<String>,
     notes: Option<String>,
+    #[serde(default)]
+    totp: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Generated {
+    value: String,
+    bits: f64,
+}
+
+#[derive(Serialize)]
+struct TotpView {
+    code: String,
+    remaining: u64,
+    period: u64,
+    issuer: Option<String>,
 }
 
 fn blank_to_none(s: Option<String>) -> Option<String> {
@@ -337,6 +355,7 @@ impl EntryForm {
             password: self.password,
             url: blank_to_none(self.url),
             notes: blank_to_none(self.notes),
+            totp: blank_to_none(self.totp),
         })
     }
 }
@@ -629,9 +648,56 @@ fn unshare_collection(state: State<AppState>, id: Uuid, user_id: UserId) -> CmdR
 }
 
 #[tauri::command]
-fn generate_password(length: usize, symbols: bool) -> CmdResult<String> {
-    let p = generator::generate(PasswordSpec { length, symbols, ..Default::default() }).map_err(err)?;
-    Ok(p.to_string())
+fn generate_password(spec: PasswordSpec) -> CmdResult<Generated> {
+    let value = generator::generate(spec).map_err(err)?.to_string();
+    Ok(Generated { value, bits: generator::password_entropy(&spec) })
+}
+
+#[tauri::command]
+fn generate_passphrase(spec: PassphraseSpec) -> CmdResult<Generated> {
+    let value = generator::generate_passphrase(&spec).map_err(err)?.to_string();
+    Ok(Generated { value, bits: generator::passphrase_entropy(&spec) })
+}
+
+/// Checks a TOTP secret/URI while the user types it.
+#[tauri::command]
+fn check_totp(totp: String) -> CmdResult<Option<String>> {
+    let t = Totp::parse(&totp).map_err(err)?;
+    Ok(t.issuer.or(t.account))
+}
+
+#[tauri::command]
+fn totp_code(state: State<AppState>, id: Uuid) -> CmdResult<TotpView> {
+    state.read(|v| {
+        let (_, e) = v.entry(id).ok_or("Entry not found")?;
+        let t = Totp::parse(e.totp.as_deref().ok_or("No TOTP for this entry")?).map_err(err)?;
+        let (code, remaining) = t.now();
+        Ok(TotpView { code, remaining, period: t.period, issuer: t.issuer })
+    })
+}
+
+/// Encrypted backup file contents (JSON text) for the UI to save.
+#[tauri::command]
+async fn export_backup(state: State<'_, AppState>, password: String) -> CmdResult<String> {
+    let password = Zeroizing::new(password);
+    check_new_password(&password)?;
+    let data = state.read(|v| Ok(v.export_backup()))?;
+    blocking(move || {
+        let file = backup::seal_backup(&data, &password, KdfParams::default()).map_err(err)?;
+        String::from_utf8(backup::to_bytes(&file).map_err(err)?).map_err(err)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn import_backup(state: State<'_, AppState>, contents: String, password: String) -> CmdResult<ImportReport> {
+    let password = Zeroizing::new(password);
+    let file = backup::from_bytes(contents.as_bytes()).map_err(err)?;
+    let data = blocking(move || {
+        backup::open_backup(&file, &password).map_err(|_| "Wrong backup password or damaged file".to_string())
+    })
+    .await?;
+    state.mutate(|v| v.import_backup(data))
 }
 
 /// Copies a field to the clipboard and clears it after 30s if unchanged.
@@ -643,12 +709,13 @@ fn copy_field(app: AppHandle, state: State<AppState>, id: Uuid, field: String) -
             "password" => Some(e.password.clone()),
             "username" => e.username.clone(),
             "url" => e.url.clone(),
+            "totp" => Some(Totp::parse(e.totp.as_deref().ok_or("No TOTP")?).map_err(err)?.now().0),
             _ => return Err(format!("unknown field {field}")),
         };
         val.ok_or_else(|| "Field is empty".to_string())
     })?);
     app.clipboard().write_text(value.to_string()).map_err(err)?;
-    if field == "password" {
+    if field == "password" || field == "totp" {
         std::thread::spawn(move || {
             std::thread::sleep(CLIPBOARD_CLEAR_AFTER);
             if app.clipboard().read_text().ok().as_deref() == Some(value.as_str()) {
@@ -794,7 +861,10 @@ fn vault_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_clipboard_manager::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init());
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     builder
@@ -832,6 +902,11 @@ pub fn run() {
             share_collection,
             unshare_collection,
             generate_password,
+            generate_passphrase,
+            check_totp,
+            totp_code,
+            export_backup,
+            import_backup,
             copy_field,
             copy_text,
             profile,

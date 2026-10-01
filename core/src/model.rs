@@ -14,6 +14,8 @@ pub struct Entry {
     pub notes: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub totp: Option<String>,
 }
 
 /// Fields a user can set when adding or editing an entry.
@@ -24,6 +26,8 @@ pub struct EntryInput {
     pub password: String,
     pub url: Option<String>,
     pub notes: Option<String>,
+    /// Validated with [`crate::totp::Totp::parse`] when saved.
+    pub totp: Option<String>,
 }
 
 /// Decrypted, read-only view of a collection.

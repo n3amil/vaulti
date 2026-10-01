@@ -65,6 +65,10 @@ pub struct EntryData {
     pub url: Option<String>,
     pub notes: Option<String>,
     pub created_at: u64,
+    /// TOTP secret or `otpauth://` URI. Skipped when empty so entries signed
+    /// before this field existed still verify byte-for-byte.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,6 +219,7 @@ mod tests {
             url: None,
             notes: None,
             created_at: 0,
+            totp: None,
         })
     }
 

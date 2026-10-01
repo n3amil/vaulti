@@ -15,6 +15,18 @@ collections can be shared with other users and organisations.
 6. Organisations: admin-signed membership log, roles
 7. Collection key rotation on member removal
 
+## Features
+
+- Collections of entries (title, username, password, URL, notes, **TOTP**), search, copy with clipboard auto-clear
+- **Generator:** passwords (length, A–Z / a–z / 0–9 / symbols, avoid look-alikes) or **passphrases**
+  (EFF wordlist without hyphenated words, 3–20 words, any separator, capitalize, add a number), with strength estimate
+- **TOTP (RFC 6238):** paste a secret or `otpauth://` link (scan on Android); code with countdown next to the password
+- **Encrypted backups:** export everything to a `.vaulti` file protected by a backup password (Argon2id +
+  XChaCha20-Poly1305); import into any vault, duplicates skipped
+- P2P device sync, pairing via QR + confirmation code, sharing collections (see below)
+
+Planned: CSV import/export (migration from Bitwarden/Vaultwarden and KeePassXC), organisations.
+
 ## Key hierarchy
 
 ```
@@ -85,7 +97,12 @@ vaulti add "AWS prod" -u admin -c work -g --length 32
 vaulti list [query] [-c work]
 vaulti show github
 vaulti edit github -g
-vaulti passwd | recover | backup-code | info | generate
+vaulti passwd | recover | backup-code | info
+vaulti generate --length 24 --no-symbols --avoid-ambiguous
+vaulti generate --passphrase --words 6 --separator " " --capitalize --number
+vaulti add GitHub -g --passphrase --totp "otpauth://totp/GitHub:me?secret=..."
+vaulti totp github                   # current code
+vaulti backup export backup.vaulti | backup import backup.vaulti
 
 # devices
 vaulti pair                          # on the existing device: prints a ticket, asks you to confirm the code

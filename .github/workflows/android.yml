@@ -1,11 +1,21 @@
 name: Android
 
-# Builds an installable (debug-signed) APK for arm64 phones.
+# Builds an optimized, signed APK for arm64 phones.
 # Run manually; release.yml calls it for version tags. The Android project
 # (app/src-tauri/gen/android) is generated fresh by `tauri android init`.
+#
+# Signing: with repo secrets ANDROID_KEYSTORE_B64 (base64 PKCS#12) and
+# ANDROID_KEYSTORE_PASSWORD the APK is signed with that permanent key, so
+# updates install over each other. Without them a throwaway test key is used
+# (uninstall before installing a newer build).
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      ANDROID_KEYSTORE_B64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -48,13 +58,35 @@ jobs:
           npx tauri android init --ci
           npx tauri icon icon.png
 
-      - name: Build APK
+      - name: Build APK (release, unsigned)
         working-directory: app
-        run: npx tauri android build --ci --debug --apk --target aarch64
+        run: npx tauri android build --ci --apk --target aarch64
 
-      - run: |
+      - name: Sign APK
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APK=$(find app/src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -1)
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          if [ -n "${KS_B64:-}" ]; then
+            echo "Signing with the permanent release key"
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks.p12"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret: signing with a throwaway test key"
+            KS_PASS=$(openssl rand -hex 16)
+            keytool -genkeypair -keystore "$RUNNER_TEMP/ks.p12" -storetype PKCS12 -alias vaulti \
+              -keyalg RSA -keysize 4096 -validity 10000 -storepass "$KS_PASS" \
+              -dname "CN=Vaulti test build" -noprompt
+          fi
+          export KS_PASS
+          # 16 KB page alignment for native libs (Android 15+), fall back for older build-tools.
+          "$BT/zipalign" -P 16 -f 4 "$APK" "$RUNNER_TEMP/aligned.apk" || "$BT/zipalign" -f 4 "$APK" "$RUNNER_TEMP/aligned.apk"
           mkdir -p out
-          find app/src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/Vaulti-android-arm64-debug.apk \;
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/ks.p12" --ks-pass env:KS_PASS --out out/Vaulti-android-arm64.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --print-certs out/Vaulti-android-arm64.apk | head -3
+          rm -f "$RUNNER_TEMP/ks.p12"
           ls -lh out
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -135,6 +135,55 @@
           <button type="button" data-action="generate">Generate</button>
         </span>
       </label>
+      <div class="generator" data-generator hidden>
+        <div class="seg" role="tablist">
+          <button type="button" data-mode="password">Password</button>
+          <button type="button" data-mode="passphrase">Passphrase</button>
+        </div>
+        <div data-gen="password">
+          <label class="inline">Length <input type="range" name="g_length" min="8" max="64" value="20"> <output data-out="length">20</output></label>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="g_upper" checked> A–Z</label>
+            <label class="check"><input type="checkbox" name="g_lower" checked> a–z</label>
+            <label class="check"><input type="checkbox" name="g_digits" checked> 0–9</label>
+            <label class="check"><input type="checkbox" name="g_symbols" checked> !@#$%</label>
+            <label class="check"><input type="checkbox" name="g_ambiguous"> Avoid look-alikes (0 O 1 l I)</label>
+          </div>
+        </div>
+        <div data-gen="passphrase" hidden>
+          <label class="inline">Words <input type="range" name="g_words" min="3" max="10" value="5"> <output data-out="words">5</output></label>
+          <label class="inline">Separator
+            <select name="g_sep">
+              <option value="-">Hyphen  -</option>
+              <option value=" ">Space</option>
+              <option value=".">Period  .</option>
+              <option value="_">Underscore  _</option>
+              <option value="#">Hash  #</option>
+              <option value="">None</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <input name="g_sep_custom" maxlength="3" placeholder="e.g. +" hidden>
+          </label>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="g_cap"> Capitalize words</label>
+            <label class="check"><input type="checkbox" name="g_num"> Add a number</label>
+          </div>
+        </div>
+        <div class="gen-preview mono" data-preview></div>
+        <div class="row">
+          <span class="strength" data-strength></span>
+          <span class="spacer"></span>
+          <button type="button" data-action="regen">New</button>
+          <button type="button" class="primary" data-action="use">Use</button>
+        </div>
+      </div>
+      <label>One-time code (TOTP)
+        <span class="row">
+          <input name="totp" class="mono" autocomplete="off" spellcheck="false" placeholder="Secret or otpauth:// link">
+          <button type="button" class="android-only" data-action="scan-totp">Scan</button>
+        </span>
+        <span class="hint small" data-totp-hint></span>
+      </label>
       <label>Website <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="https://"></label>
       <label>Collection <select name="collection"></select></label>
       <label>Notes <textarea name="notes" rows="3"></textarea></label>
@@ -179,6 +228,22 @@
         <p class="error" data-error></p>
         <button type="submit">Change password</button>
       </form>
+      <div>
+        <h3>Backup</h3>
+        <p class="muted">Save all collections and entries to a file encrypted with a backup password. Keep it somewhere safe, e.g. on a USB stick.</p>
+        <form id="backup-export-form">
+          <label>Backup password <input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+          <label>Repeat <input type="password" name="repeat" autocomplete="new-password" required></label>
+          <p class="error" data-error></p>
+          <button type="submit">Export backup…</button>
+        </form>
+        <form id="backup-import-form">
+          <p class="muted small">Importing adds entries to collections with the same name; entries you already have are skipped.</p>
+          <label>Backup password <input type="password" name="password" autocomplete="off" required></label>
+          <p class="error" data-error></p>
+          <button type="submit">Import backup…</button>
+        </form>
+      </div>
       <div>
         <h3>Backup code</h3>
         <p class="muted">Create a new backup code. Your current one stops working.</p>

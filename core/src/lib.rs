@@ -5,6 +5,7 @@
 
 pub mod account;
 mod b64;
+pub mod backup;
 pub mod collection;
 pub mod crypto;
 pub mod error;
@@ -15,6 +16,7 @@ pub mod model;
 pub mod recovery;
 pub mod stamp;
 pub mod store;
+pub mod totp;
 pub mod vault;
 
 pub use account::ContactCard;

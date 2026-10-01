@@ -12,6 +12,7 @@ fn sample(title: &str) -> EntryInput {
         password: "hunter2".into(),
         url: Some("https://github.com".into()),
         notes: None,
+        totp: None,
     }
 }
 
@@ -368,4 +369,82 @@ fn strangers_and_impostors_are_rejected() {
     let mut own = mallory.sync_message(&Peer::OwnDevice).unwrap();
     own.card = mallory.my_card();
     assert!(alice.apply_sync(&Peer::OwnDevice, own).is_err());
+}
+
+// --- totp & backups ------------------------------------------------------------------
+
+#[test]
+fn totp_is_validated_stored_and_synced() {
+    let (mut laptop, _) = Vault::create("pw", kdf()).unwrap();
+    let pid = personal(&laptop);
+    let bad = EntryInput { totp: Some("not a secret!".into()), ..sample("x") };
+    assert!(laptop.add_entry(pid, bad).is_err());
+    let blank = laptop.add_entry(pid, EntryInput { totp: Some("  ".into()), ..sample("blank") }).unwrap();
+    assert_eq!(laptop.entry(blank).unwrap().1.totp, None);
+
+    let uri = "otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub";
+    let id = laptop.add_entry(pid, EntryInput { totp: Some(uri.into()), ..sample("with totp") }).unwrap();
+    let mut phone = pair(&mut laptop, "pw");
+    sync(&mut laptop, &mut phone);
+    assert_eq!(phone.entry(id).unwrap().1.totp.as_deref(), Some(uri));
+    assert_eq!(reload(&phone, "pw").entry(id).unwrap().1.totp.as_deref(), Some(uri));
+}
+
+#[test]
+fn entries_without_totp_keep_their_signatures() {
+    // Simulates data signed by a build without the totp field.
+    #[derive(serde::Serialize)]
+    struct OldData<'a> {
+        title: &'a str,
+        username: Option<&'a str>,
+        password: &'a str,
+        url: Option<&'a str>,
+        notes: Option<&'a str>,
+        created_at: u64,
+    }
+    let old = serde_json::to_vec(&OldData {
+        title: "t",
+        username: None,
+        password: "p",
+        url: None,
+        notes: None,
+        created_at: 5,
+    })
+    .unwrap();
+    let new = serde_json::to_vec(&EntryData {
+        title: "t".into(),
+        username: None,
+        password: "p".into(),
+        url: None,
+        notes: None,
+        created_at: 5,
+        totp: None,
+    })
+    .unwrap();
+    assert_eq!(old, new);
+}
+
+#[test]
+fn backup_export_import_roundtrip_and_dedupe() {
+    use crate::backup::{from_bytes, open_backup, seal_backup, to_bytes};
+    let (mut v, _) = Vault::create("pw", kdf()).unwrap();
+    let work = v.create_collection("Work").unwrap();
+    v.add_entry(personal(&v), sample("GitHub")).unwrap();
+    v.add_entry(work, EntryInput { totp: Some("JBSWY3DPEHPK3PXP".into()), ..sample("AWS") }).unwrap();
+
+    let bytes = to_bytes(&seal_backup(&v.export_backup(), "backup password", kdf()).unwrap()).unwrap();
+
+    // Into a brand-new vault (e.g. after losing all devices).
+    let (mut fresh, _) = Vault::create("other", kdf()).unwrap();
+    let data = open_backup(&from_bytes(&bytes).unwrap(), "backup password").unwrap();
+    let r = fresh.import_backup(data.clone()).unwrap();
+    assert_eq!((r.collections_created, r.entries_added, r.entries_skipped), (1, 2, 0), "Personal exists, Work is new");
+    let aws = fresh.search("aws")[0].1.clone();
+    assert_eq!(aws.totp.as_deref(), Some("JBSWY3DPEHPK3PXP"));
+    assert_eq!(fresh.search("aws")[0].0.name, "Work");
+
+    // Importing again changes nothing.
+    let r = fresh.import_backup(data).unwrap();
+    assert_eq!((r.collections_created, r.entries_added, r.entries_skipped), (0, 0, 2));
+    assert!(open_backup(&from_bytes(&bytes).unwrap(), "wrong").is_err());
 }

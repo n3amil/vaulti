@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use uuid::Uuid;
-use vaulti_core::generator::{self, PasswordSpec};
-use vaulti_core::{store, BackupCode, Collection, ContactCard, Entry, EntryInput, KdfParams, Role, UserId, Vault};
+use vaulti_core::generator::{self, PassphraseSpec, PasswordSpec};
+use vaulti_core::totp::Totp;
+use vaulti_core::{
+    backup, store, BackupCode, Collection, ContactCard, Entry, EntryInput, KdfParams, Role, UserId, Vault,
+};
 use vaulti_sync::{Network, SharedVault, SyncNode};
 use zeroize::Zeroizing;
 
@@ -42,11 +45,14 @@ enum Cmd {
         /// Collection name or id [default: first collection]
         #[arg(short, long)]
         collection: Option<String>,
+        /// TOTP secret or otpauth:// URI
+        #[arg(long)]
+        totp: Option<String>,
         /// Generate a password instead of prompting for one
         #[arg(short, long)]
         generate: bool,
-        #[arg(long, default_value_t = 20)]
-        length: usize,
+        #[command(flatten)]
+        gen: GenOpts,
     },
     /// List entries, optionally filtered
     List {
@@ -73,9 +79,14 @@ enum Cmd {
         /// Generate a new password
         #[arg(short, long, conflicts_with = "password")]
         generate: bool,
-        #[arg(long, default_value_t = 20)]
-        length: usize,
+        #[command(flatten)]
+        gen: GenOpts,
+        /// TOTP secret or otpauth:// URI ("" removes it)
+        #[arg(long)]
+        totp: Option<String>,
     },
+    /// Print the current TOTP code of an entry
+    Totp { entry: String },
     /// Remove an entry
     Rm { entry: String },
     /// Manage collections
@@ -119,13 +130,81 @@ enum Cmd {
     Unshare { collection: String, contact: String },
     /// List the members of a collection
     Members { collection: String },
-    /// Generate a random password (no vault needed)
+    /// Encrypted backup files (export / import)
+    #[command(subcommand)]
+    Backup(BackupCmd),
+    /// Generate a random password or passphrase (no vault needed)
     Generate {
-        #[arg(long, default_value_t = 20)]
-        length: usize,
-        #[arg(long)]
-        no_symbols: bool,
+        #[command(flatten)]
+        gen: GenOpts,
     },
+}
+
+/// Password / passphrase generator options.
+#[derive(clap::Args, Clone, Debug)]
+struct GenOpts {
+    /// Password length
+    #[arg(long, default_value_t = 20)]
+    length: usize,
+    #[arg(long)]
+    no_lower: bool,
+    #[arg(long)]
+    no_upper: bool,
+    #[arg(long)]
+    no_digits: bool,
+    #[arg(long)]
+    no_symbols: bool,
+    /// Leave out look-alike characters (0 O 1 l I |)
+    #[arg(long)]
+    avoid_ambiguous: bool,
+    /// Generate a passphrase of random words instead of a password
+    #[arg(long)]
+    passphrase: bool,
+    /// Number of words in a passphrase
+    #[arg(long, default_value_t = 5)]
+    words: usize,
+    /// Word separator, e.g. "-", " " or "#"
+    #[arg(long, default_value = "-")]
+    separator: String,
+    /// Capitalize each word
+    #[arg(long)]
+    capitalize: bool,
+    /// Add a digit to one of the words
+    #[arg(long)]
+    number: bool,
+}
+
+impl GenOpts {
+    /// Returns the secret and its estimated entropy in bits.
+    fn generate(&self) -> Result<(Secret, f64)> {
+        if self.passphrase {
+            let spec = PassphraseSpec {
+                words: self.words,
+                separator: self.separator.clone(),
+                capitalize: self.capitalize,
+                include_number: self.number,
+            };
+            Ok((generator::generate_passphrase(&spec)?, generator::passphrase_entropy(&spec)))
+        } else {
+            let spec = PasswordSpec {
+                length: self.length,
+                lower: !self.no_lower,
+                upper: !self.no_upper,
+                digits: !self.no_digits,
+                symbols: !self.no_symbols,
+                avoid_ambiguous: self.avoid_ambiguous,
+            };
+            Ok((generator::generate(spec)?, generator::password_entropy(&spec)))
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum BackupCmd {
+    /// Write all collections and entries to an encrypted backup file
+    Export { file: PathBuf },
+    /// Import entries from a backup file (skips ones already present)
+    Import { file: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -205,12 +284,11 @@ fn run(cli: Cli) -> Result<()> {
             println!("fingerprint:  {}", v.identity_public().fingerprint());
             println!("this device:  {}", v.node_id());
         }
-        Cmd::Add { title, username, url, notes, collection, generate, length } => {
+        Cmd::Add { title, username, url, notes, collection, totp, generate, gen } => {
             let mut v = unlock(&path)?;
             let cid = resolve_collection(&v, collection.as_deref())?;
-            let password =
-                if generate { gen(length, false)?.to_string() } else { prompt("Entry password")?.to_string() };
-            v.add_entry(cid, EntryInput { title: title.clone(), username, password, url, notes })?;
+            let password = if generate { gen.generate()?.0.to_string() } else { prompt("Entry password")?.to_string() };
+            v.add_entry(cid, EntryInput { title: title.clone(), username, password, url, notes, totp })?;
             store::save(&path, &v.to_file()?)?;
             println!("Added \"{title}\" to {}", v.collection(cid).expect("exists").name);
         }
@@ -235,17 +313,29 @@ fn run(cli: Cli) -> Result<()> {
             println!("title:      {}", e.title);
             println!("username:   {}", e.username.as_deref().unwrap_or(""));
             println!("password:   {}", e.password);
+            if let Some(t) = e.totp.as_deref().and_then(|t| Totp::parse(t).ok()) {
+                let (code, left) = t.now();
+                println!("totp:       {code}  ({left}s left)");
+            }
             println!("url:        {}", e.url.as_deref().unwrap_or(""));
             if let Some(n) = &e.notes {
                 println!("notes:      {n}");
             }
         }
-        Cmd::Edit { entry, title, username, url, notes, password, generate, length } => {
+        Cmd::Totp { entry } => {
+            let v = unlock(&path)?;
+            let e = v.entry(resolve_entry(&v, &entry)?).expect("resolved").1;
+            let t = Totp::parse(e.totp.as_deref().ok_or_else(|| anyhow!("\"{}\" has no TOTP", e.title))?)?;
+            let (code, left) = t.now();
+            println!("{code}");
+            eprintln!("valid for {left}s");
+        }
+        Cmd::Edit { entry, title, username, url, notes, password, generate, gen, totp } => {
             let mut v = unlock(&path)?;
             let id = resolve_entry(&v, &entry)?;
             let cur = v.entry(id).expect("resolved").1.clone();
             let new_pw = if generate {
-                gen(length, false)?.to_string()
+                gen.generate()?.0.to_string()
             } else if password {
                 prompt("New entry password")?.to_string()
             } else {
@@ -259,6 +349,7 @@ fn run(cli: Cli) -> Result<()> {
                     password: new_pw,
                     url: url.or(cur.url),
                     notes: notes.or(cur.notes),
+                    totp: totp.or(cur.totp),
                 },
             )?;
             store::save(&path, &v.to_file()?)?;
@@ -524,8 +615,41 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{:<8} {}{me}  {}", role_name(Some(m.role)), m.name, m.identity.fingerprint());
             }
         }
-        Cmd::Generate { length, no_symbols } => {
-            println!("{}", *gen(length, no_symbols)?);
+        Cmd::Backup(cmd) => match cmd {
+            BackupCmd::Export { file } => {
+                let v = unlock(&path)?;
+                let pw = secret_from_env("VAULTI_BACKUP_PASSWORD").map(Ok).unwrap_or_else(|| {
+                    eprintln!("Choose a password for the backup file (can differ from your master password).");
+                    new_password("Backup password")
+                })?;
+                let data = v.export_backup();
+                let count: usize = data.collections.iter().map(|c| c.entries.len()).sum();
+                let sealed = backup::seal_backup(&data, &pw, kdf_params())?;
+                std::fs::write(&file, backup::to_bytes(&sealed)?)
+                    .with_context(|| format!("writing {}", file.display()))?;
+                println!("Exported {} collections, {count} entries to {}", data.collections.len(), file.display());
+            }
+            BackupCmd::Import { file } => {
+                let bytes = std::fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
+                let sealed = backup::from_bytes(&bytes)?;
+                let mut v = unlock(&path)?;
+                let pw = match secret_from_env("VAULTI_BACKUP_PASSWORD") {
+                    Some(pw) => pw,
+                    None => prompt("Backup password")?,
+                };
+                let data = backup::open_backup(&sealed, &pw).context("wrong backup password or damaged file")?;
+                let r = v.import_backup(data)?;
+                store::save(&path, &v.to_file()?)?;
+                println!(
+                    "Imported {} entries ({} already present), {} new collections",
+                    r.entries_added, r.entries_skipped, r.collections_created
+                );
+            }
+        },
+        Cmd::Generate { gen } => {
+            let (secret, bits) = gen.generate()?;
+            println!("{}", *secret);
+            eprintln!("~{bits:.0} bits of entropy");
         }
     }
     Ok(())
@@ -662,9 +786,8 @@ fn prompt(label: &str) -> Result<Secret> {
     Ok(Zeroizing::new(rpassword::prompt_password(format!("{label}: "))?))
 }
 
-fn gen(length: usize, no_symbols: bool) -> Result<Secret> {
-    let p = generator::generate(PasswordSpec { length, symbols: !no_symbols, ..Default::default() })?;
-    Ok(p)
+fn secret_from_env(var: &str) -> Option<Secret> {
+    std::env::var(var).ok().map(Zeroizing::new)
 }
 
 fn print_backup_code(code: &BackupCode) {
