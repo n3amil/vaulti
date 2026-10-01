@@ -277,6 +277,34 @@ joinForm.addEventListener('submit', async (e) => {
 });
 
 $('#go-recover').addEventListener('click', () => show('recover'));
+
+// --- use a different vault (lock screen) ---
+
+$('#go-switch').addEventListener('click', () => show('switch'));
+$('#switch-back').addEventListener('click', () => show('lock'));
+
+async function setAside(next) {
+  const ok = await confirmDialog(
+    t('Set this device up again? Your current vault is kept as a backup file and can be restored by renaming it back.'),
+    t('Continue'),
+  );
+  if (!ok) return;
+  try {
+    const backup = await invoke('set_aside_vault');
+    if (backup) toast(t('Old vault kept as {file}', { file: backup.split(/[\\/]/).pop() }));
+    next();
+  } catch (err) {
+    toast(err);
+  }
+}
+
+$('#switch-pair').addEventListener('click', () =>
+  setAside(() => {
+    joinForm.reset();
+    showJoinStep('ticket');
+  }),
+);
+$('#switch-new').addEventListener('click', () => setAside(() => show('setup')));
 $('#back-to-lock').addEventListener('click', () => show('lock'));
 
 $('#recover-form').addEventListener('submit', async (e) => {

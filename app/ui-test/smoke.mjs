@@ -44,6 +44,14 @@ for (const locale of ['de-DE', 'en-US']) {
   await step('trash entry', () => p.click('#entry-list li:first-child'));
   await step('sync now', () => p.click('#sync-status'));
   await step('lock', () => p.click('#lock-now'));
+  await step('different vault', () => p.click('#go-switch'));
+  await step('switch back', () => p.click('#switch-back'));
+  await step('different vault again', () => p.click('#go-switch'));
+  await step('pair instead', () => p.click('#switch-pair'));
+  await step('confirm set aside', () => p.click('#confirm-dialog [data-ok]'));
+  await step('join screen shown', async () => { if (await p.isHidden('#screen-join')) throw new Error('join screen not shown'); });
+  await step('back to setup', () => p.click('#back-to-setup'));
+  await step('setup screen shown', async () => { if (await p.isHidden('#screen-setup')) throw new Error('setup screen not shown'); });
   await p.close();
 }
 console.log(errors.length ? errors.join('\n') : 'smoke: no errors'); process.exit(errors.length ? 1 : 0);

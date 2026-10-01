@@ -184,6 +184,21 @@ const de = {
   'No login form found on this page': 'Auf dieser Seite wurde kein Anmeldeformular gefunden',
   'Synced with {n} devices': 'Mit {n} Geräten synchronisiert',
 
+  // use a different vault
+  'Use a different vault…': 'Anderen Tresor verwenden…',
+  'Use a different vault': 'Anderen Tresor verwenden',
+  'Set this device up again. Your current vault is not deleted: it is kept as a backup file next to it.':
+    'Richte dieses Gerät neu ein. Dein aktueller Tresor wird nicht gelöscht, sondern als Sicherungsdatei daneben aufbewahrt.',
+  'Pair with another device': 'Mit anderem Gerät koppeln',
+  'Get the vault from a device that has it (e.g. after resetting this one).':
+    'Den Tresor von einem Gerät holen, das ihn hat (z. B. nach dem Zurücksetzen dieses Geräts).',
+  'Create a new vault': 'Neuen Tresor anlegen',
+  'Start empty with a new master password and backup code.': 'Leer beginnen, mit neuem Master-Passwort und Wiederherstellungscode.',
+  'Set this device up again? Your current vault is kept as a backup file and can be restored by renaming it back.':
+    'Dieses Gerät neu einrichten? Dein aktueller Tresor bleibt als Sicherungsdatei erhalten und lässt sich durch Zurückbenennen wiederherstellen.',
+  'Old vault kept as {file}': 'Alter Tresor aufbewahrt als {file}',
+  'Lock the vault first': 'Sperre den Tresor zuerst',
+
   // settings
   'Language': 'Sprache',
   'Automatic': 'Automatisch',

@@ -67,7 +67,21 @@
       <p class="error" data-error></p>
       <button class="primary" type="submit" data-i18n="Unlock">Unlock</button>
       <button type="button" class="link" id="go-recover" data-i18n="Forgot master password?">Forgot master password?</button>
+      <button type="button" class="link" id="go-switch" data-i18n="Use a different vault…">Use a different vault…</button>
     </form>
+  </section>
+
+  <!-- Replace the vault on this device: pair again or start over -->
+  <section id="screen-switch" class="screen center" hidden>
+    <div class="card">
+      <h1 data-i18n="Use a different vault">Use a different vault</h1>
+      <p class="muted" data-i18n="Set this device up again. Your current vault is not deleted: it is kept as a backup file next to it.">Set this device up again. Your current vault is not deleted: it is kept as a backup file next to it.</p>
+      <button class="primary" id="switch-pair" data-i18n="Pair with another device">Pair with another device</button>
+      <p class="muted small" data-i18n="Get the vault from a device that has it (e.g. after resetting this one).">Get the vault from a device that has it (e.g. after resetting this one).</p>
+      <button id="switch-new" data-i18n="Create a new vault">Create a new vault</button>
+      <p class="muted small" data-i18n="Start empty with a new master password and backup code.">Start empty with a new master password and backup code.</p>
+      <button type="button" class="link" id="switch-back" data-i18n="Back">Back</button>
+    </div>
   </section>
 
   <!-- Recover with backup code -->

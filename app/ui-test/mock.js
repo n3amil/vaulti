@@ -21,6 +21,7 @@ const data = {
   },
   get_entry: { id: 'e1', title: 'GitHub', username: 'n3amil', password: 'x', url: 'https://github.com', notes: 'Notiz', totp: 'JBSWY3DPEHPK3PXP', collection_id: 'c1', updated_at: now - 3600 },
   sync_status: { online: true, last_sync: now - 120, peers: [{ node_id: 'n2', ok: true }, { node_id: 'n3', ok: false }] },
+  set_aside_vault: '/home/me/.local/share/vaulti/vault.1790000000.bak',
   start_pairing: { ticket: 'vaulti-pair:abc', qr_svg: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
   totp_code: { code: '123456', remaining: 17 },
   generate_password: { value: 'q7#Lp2!vXz9@Rm4&Kt8w', bits: 128 },

@@ -536,6 +536,26 @@ async fn join_unlock(app: AppHandle, state: State<'_, AppState>, password: Strin
     start_sync(&app, &state).await
 }
 
+/// Moves the (locked) vault file aside so this device can be set up again:
+/// pair from another device or create a new vault. Nothing is deleted; the
+/// old file stays next to it as `vault.<timestamp>.bak` and can be restored
+/// by renaming it back. Returns that path.
+#[tauri::command]
+async fn set_aside_vault(state: State<'_, AppState>) -> CmdResult<String> {
+    if state.vault.lock().map_err(err)?.is_some() {
+        return Err("Lock the vault first".into());
+    }
+    stop_sync(&state).await;
+    *state.pending_join.lock().map_err(err)? = None;
+    if !state.path.exists() {
+        return Ok(String::new());
+    }
+    let stamp = vaulti_core::now();
+    let backup = state.path.with_extension(format!("{stamp}.bak"));
+    std::fs::rename(&state.path, &backup).map_err(err)?;
+    Ok(backup.display().to_string())
+}
+
 #[tauri::command]
 fn join_cancel(state: State<AppState>) -> CmdResult<()> {
     *state.pending_join.lock().map_err(err)? = None;
@@ -964,6 +984,7 @@ pub fn run() {
             join_fetch,
             join_unlock,
             join_cancel,
+            set_aside_vault,
             overview,
             get_entry,
             add_entry,
