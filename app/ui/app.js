@@ -45,11 +45,11 @@ function show(name) {
 
 let toastTimer;
 function toast(msg) {
-  const t = $('#toast');
-  t.textContent = translateError(msg);
-  t.hidden = false;
+  const el = $('#toast');
+  el.textContent = translateError(msg);
+  el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2200);
+  toastTimer = setTimeout(() => (el.hidden = true), 2200);
 }
 
 function setError(root, msg) {
@@ -477,10 +477,10 @@ function startTotp(id, codeEl, leftEl) {
   let remaining = 0;
   const fetchCode = async () => {
     try {
-      const t = await invoke('totp_code', { id });
-      const c = t.code;
+      const totp = await invoke('totp_code', { id });
+      const c = totp.code;
       codeEl.textContent = c.length === 6 ? `${c.slice(0, 3)} ${c.slice(3)}` : c.length === 8 ? `${c.slice(0, 4)} ${c.slice(4)}` : c;
-      remaining = t.remaining;
+      remaining = totp.remaining;
     } catch (err) {
       codeEl.textContent = '—';
       leftEl.textContent = '';
@@ -1216,9 +1216,9 @@ devicesDialog.addEventListener('click', async (e) => {
     await busy(e.target, async () => {
       try {
         e.target.textContent = t('Preparing…');
-        const t = await invoke('start_pairing');
-        $('[data-ticket]', devicesDialog).value = t.ticket;
-        if (t.qr_svg) $('[data-qr]', devicesDialog).src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t.qr_svg);
+        const pairing = await invoke('start_pairing');
+        $('[data-ticket]', devicesDialog).value = pairing.ticket;
+        if (pairing.qr_svg) $('[data-qr]', devicesDialog).src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(pairing.qr_svg);
         $('[data-pair-wait]', devicesDialog).textContent = t('Waiting for the other device…');
         $('[data-pairing]', devicesDialog).hidden = false;
         $('[data-pair-start]', devicesDialog).hidden = true;
