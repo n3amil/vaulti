@@ -46,14 +46,9 @@ jobs:
           npx tauri ios init --ci
           npx tauri icon icon.png
 
+      # tauri drives xcodebuild (the Xcode project calls back into the running CLI).
       - name: Build for the simulator (unsigned)
-        working-directory: app/src-tauri/gen/apple
-        run: |
-          set -euo pipefail
-          PROJ=$(ls -d *.xcodeproj | head -1)
-          SCHEME=$(xcodebuild -list -json -project "$PROJ" | python3 -c 'import json,sys; s=json.load(sys.stdin)["project"]["schemes"]; print(next(x for x in s if x.endswith("_iOS")))')
-          echo "project=$PROJ scheme=$SCHEME"
-          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
-          find build -name '*.app' -maxdepth 5 | head -3
+        working-directory: app
+        run: npx tauri ios build --ci --debug --target aarch64-sim
+
+      - run: find app/src-tauri/gen/apple/build -name '*.app' -maxdepth 6 | head -3
