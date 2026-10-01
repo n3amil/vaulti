@@ -147,6 +147,31 @@ const de = {
   'Collection deleted': 'Sammlung gelöscht',
   'Personal': 'Persönlich',
 
+  // trash & history
+  'Trash': 'Papierkorb',
+  'Empty trash': 'Papierkorb leeren',
+  'The trash is empty.': 'Der Papierkorb ist leer.',
+  'Deleted for good tomorrow': 'Wird morgen endgültig gelöscht',
+  'Deleted for good in {n} days': 'Wird in {n} Tagen endgültig gelöscht',
+  "Delete everything in the trash for good? This can't be undone.":
+    'Alles im Papierkorb endgültig löschen? Das kann nicht rückgängig gemacht werden.',
+  '{n} entries deleted for good': '{n} Einträge endgültig gelöscht',
+  'Restore': 'Wiederherstellen',
+  'Delete forever': 'Endgültig löschen',
+  'In the trash.': 'Im Papierkorb.',
+  'History ({n})': 'Verlauf ({n})',
+  'Moved to the trash': 'In den Papierkorb verschoben',
+  'Restored to "{name}"': 'Wiederhergestellt in „{name}“',
+  "Delete \"{title}\" for good? This can't be undone.": '„{title}“ endgültig löschen? Das kann nicht rückgängig gemacht werden.',
+  'Deleted for good': 'Endgültig gelöscht',
+  'History of "{title}"': 'Verlauf von „{title}“',
+  'Earlier versions of this entry, including changes others made at the same time. Restoring one keeps the current version in the history.':
+    'Frühere Versionen dieses Eintrags, auch gleichzeitige Änderungen anderer. Beim Wiederherstellen bleibt die aktuelle Version im Verlauf.',
+  'by you': 'von dir',
+  'by {name}': 'von {name}',
+  'differs in: {fields}': 'anders: {fields}',
+  'Earlier version restored': 'Frühere Version wiederhergestellt',
+
   // settings
   'Language': 'Sprache',
   'Automatic': 'Automatisch',

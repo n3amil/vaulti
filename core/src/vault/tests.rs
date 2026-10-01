@@ -419,6 +419,7 @@ fn entries_without_totp_keep_their_signatures() {
         notes: None,
         created_at: 5,
         totp: None,
+        trashed_at: None,
     })
     .unwrap();
     assert_eq!(old, new);
@@ -447,4 +448,121 @@ fn backup_export_import_roundtrip_and_dedupe() {
     let r = fresh.import_backup(data).unwrap();
     assert_eq!((r.collections_created, r.entries_added, r.entries_skipped), (0, 0, 2));
     assert!(open_backup(&from_bytes(&bytes).unwrap(), "wrong").is_err());
+}
+
+#[test]
+fn trash_restore_and_purge() {
+    let (mut v, _) = Vault::create("pw", kdf()).unwrap();
+    let pid = personal(&v);
+    let eid = v.add_entry(pid, sample("a")).unwrap();
+    v.trash_entry(eid).unwrap();
+    assert!(v.entry(eid).is_none());
+    assert_eq!(v.trashed_entry(eid).unwrap().1.title, "a");
+    assert!(v.trashed_entry(eid).unwrap().1.trashed_at.is_some());
+
+    v.restore_entry(eid).unwrap();
+    assert!(v.trashed_entry(eid).is_none());
+    assert_eq!(v.entry(eid).unwrap().1.title, "a");
+    // Trashing and restoring are not edits, so they leave no history.
+    assert!(v.entry_history(eid).unwrap().is_empty());
+
+    v.trash_entry(eid).unwrap();
+    assert_eq!(v.empty_trash(0).unwrap(), 0, "not old enough");
+    assert_eq!(v.empty_trash(u64::MAX).unwrap(), 1);
+    assert!(v.trashed_entry(eid).is_none() && v.entry(eid).is_none());
+
+    // Survives save and reload.
+    let other = v.add_entry(pid, sample("b")).unwrap();
+    v.trash_entry(other).unwrap();
+    let v = reload(&v, "pw");
+    assert_eq!(v.trashed_entry(other).unwrap().1.title, "b");
+}
+
+#[test]
+fn trash_syncs_between_devices() {
+    let (mut laptop, _) = Vault::create("pw", kdf()).unwrap();
+    let eid = laptop.add_entry(personal(&laptop), sample("a")).unwrap();
+    let mut phone = pair(&mut laptop, "pw");
+    phone.trash_entry(eid).unwrap();
+    sync(&mut laptop, &mut phone);
+    assert!(laptop.entry(eid).is_none());
+    assert!(laptop.trashed_entry(eid).is_some());
+    laptop.restore_entry(eid).unwrap();
+    sync(&mut laptop, &mut phone);
+    assert!(phone.entry(eid).is_some());
+}
+
+#[test]
+fn edits_keep_history_and_restore_works() {
+    let (mut v, _) = Vault::create("pw", kdf()).unwrap();
+    let eid = v.add_entry(personal(&v), sample("v1")).unwrap();
+    for t in ["v2", "v3"] {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        v.update_entry(eid, sample(t)).unwrap();
+    }
+    let h = v.entry_history(eid).unwrap();
+    assert_eq!(h.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["v2", "v1"]);
+    assert!(h[0].by_me);
+
+    v.restore_revision(eid, &h[1].id).unwrap();
+    assert_eq!(v.entry(eid).unwrap().1.title, "v1");
+    let titles: Vec<String> = v.entry_history(eid).unwrap().into_iter().map(|r| r.title).collect();
+    assert_eq!(titles[0], "v3", "the version we replaced is in history");
+
+    for i in 0..20 {
+        v.update_entry(eid, sample(&format!("n{i}"))).unwrap();
+    }
+    assert_eq!(v.entry_history(eid).unwrap().len(), crate::collection::HISTORY_LEN);
+}
+
+#[test]
+fn concurrent_offline_edits_keep_the_losing_one_in_history() {
+    let (mut laptop, _) = Vault::create("pw", kdf()).unwrap();
+    let eid = laptop.add_entry(personal(&laptop), sample("v0")).unwrap();
+    let mut phone = pair(&mut laptop, "pw");
+
+    laptop.update_entry(eid, sample("laptop edit")).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    phone.update_entry(eid, sample("phone edit")).unwrap();
+    sync(&mut laptop, &mut phone);
+
+    for v in [&laptop, &phone] {
+        assert_eq!(v.entry(eid).unwrap().1.title, "phone edit");
+        let titles: Vec<String> = v.entry_history(eid).unwrap().into_iter().map(|r| r.title).collect();
+        assert_eq!(titles, ["laptop edit", "v0"], "both devices converge on the same history");
+    }
+    let (ra, rb) = sync(&mut laptop, &mut phone);
+    assert!(!ra.changed && !rb.changed);
+}
+
+#[test]
+fn shared_collection_history_reaches_members() {
+    let mut alice = new_user("Alice");
+    let mut bob = new_user("Bob");
+    befriend(&mut alice, &mut bob);
+    let cid = alice.create_collection("Shared").unwrap();
+    let eid = alice.add_entry(cid, sample("first")).unwrap();
+    alice.share_collection(cid, &bob.user_id(), Role::Editor).unwrap();
+    sync(&mut alice, &mut bob);
+    bob.update_entry(eid, sample("bob's change")).unwrap();
+    sync(&mut alice, &mut bob);
+    let h = alice.entry_history(eid).unwrap();
+    assert_eq!(h[0].title, "first");
+    assert!(h[0].by_me);
+    assert_eq!(alice.entry(eid).unwrap().1.title, "bob's change");
+}
+
+#[test]
+fn delete_forever_drops_history_everywhere() {
+    let (mut laptop, _) = Vault::create("pw", kdf()).unwrap();
+    let eid = laptop.add_entry(personal(&laptop), sample("v1")).unwrap();
+    laptop.update_entry(eid, sample("v2")).unwrap();
+    let mut phone = pair(&mut laptop, "pw");
+    assert_eq!(phone.entry_history(eid).unwrap().len(), 1);
+    phone.remove_entry(eid).unwrap();
+    sync(&mut laptop, &mut phone);
+    assert!(laptop.entry(eid).is_none() && laptop.trashed_entry(eid).is_none());
+    assert!(laptop.entry_history(eid).is_err());
+    let json = String::from_utf8(serde_json::to_vec(&laptop.export_backup()).unwrap()).unwrap();
+    assert!(!json.contains("v1"));
 }

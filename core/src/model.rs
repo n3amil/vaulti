@@ -16,6 +16,26 @@ pub struct Entry {
     pub updated_at: u64,
     #[serde(default)]
     pub totp: Option<String>,
+    /// Set for entries in the trash.
+    #[serde(default)]
+    pub trashed_at: Option<u64>,
+}
+
+/// An earlier version of an entry, from its history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Revision {
+    /// Identifies this version within the entry (from its unique stamp).
+    pub id: String,
+    /// When this version was saved (unix seconds).
+    pub changed_at: u64,
+    pub author_name: String,
+    pub by_me: bool,
+    pub title: String,
+    pub username: Option<String>,
+    pub password: String,
+    pub url: Option<String>,
+    pub notes: Option<String>,
+    pub totp: Option<String>,
 }
 
 /// Fields a user can set when adding or editing an entry.
@@ -36,6 +56,9 @@ pub struct Collection {
     pub id: Uuid,
     pub name: String,
     pub entries: Vec<Entry>,
+    /// Entries in the trash, restorable until purged.
+    #[serde(default)]
+    pub trash: Vec<Entry>,
     pub updated_at: u64,
     pub owner: UserId,
     pub members: Vec<Member>,
@@ -65,6 +88,6 @@ pub struct DeviceView {
     pub this_device: bool,
 }
 
-pub(crate) fn now() -> u64 {
+pub fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }

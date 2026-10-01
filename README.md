@@ -24,6 +24,8 @@ collections can be shared with other users and organisations.
 - **Encrypted backups:** export everything to a `.vaulti` file protected by a backup password (Argon2id +
   XChaCha20-Poly1305); import into any vault, duplicates skipped
 - P2P device sync, pairing via QR + confirmation code, sharing collections (see below)
+- **Trash:** deleting moves an entry to the trash (synced, also in shared collections); restore it or it is deleted for good after 30 days
+- **History:** the last 10 versions of every entry are kept and synced, including edits that lost to a concurrent change made offline; any version can be restored
 - **Languages:** English and German (follows the system language, or pick one under Settings). Strings live in `app/ui/i18n.js`, English text is the key.
 
 Planned: CSV import/export (migration from Bitwarden/Vaultwarden and KeePassXC), organisations.
@@ -51,7 +53,9 @@ collection key ─seals─▶ collection doc: owner-signed meta (name, members, 
   mDNS on the LAN, relays as fallback. Relays only see encrypted QUIC; vault data is encrypted again.
 - **Who can connect:** only your own devices and your contacts' devices; anyone else is refused before data is read.
 - **Merge:** state-based CRDT. Per entry, the newest version (hybrid logical clock) with a valid
-  signature from a current editor/owner wins; deletes are tombstones. Account data is last-writer-wins.
+  signature from a current editor/owner wins; older versions (also the losing side of a concurrent edit)
+  go to the entry's history, which merges as a union capped at 10. Trashing is a normal version with
+  `trashed_at` set; deleting for good is a tombstone and drops the history. Account data is last-writer-wins.
 - **Pairing:** the existing device shows a one-time QR/ticket (10 min). The new device connects,
   both show a 6-digit code (bound to the ticket secret and both device keys), you confirm on the
   existing device, then it sends the encrypted vault; the new device unlocks it with your master password.

@@ -87,7 +87,7 @@ enum Cmd {
     },
     /// Print the current TOTP code of an entry
     Totp { entry: String },
-    /// Remove an entry
+    /// Move an entry to the trash
     Rm { entry: String },
     /// Manage collections
     #[command(subcommand)]
@@ -357,9 +357,9 @@ fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Rm { entry } => {
             let mut v = unlock(&path)?;
-            let removed = v.remove_entry(resolve_entry(&v, &entry)?)?;
+            let removed = v.trash_entry(resolve_entry(&v, &entry)?)?;
             store::save(&path, &v.to_file()?)?;
-            println!("Removed \"{}\"", removed.title);
+            println!("Moved \"{}\" to the trash", removed.title);
         }
         Cmd::Collection(cmd) => {
             let mut v = unlock(&path)?;

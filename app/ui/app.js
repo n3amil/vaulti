@@ -9,6 +9,8 @@ const { listen } = window.__TAURI__.event;
 const $ = (sel, root = document) => root.querySelector(sel);
 
 const AUTO_LOCK_MS = 5 * 60 * 1000;
+const TRASH = 'trash'; // pseudo collection id for the trash view
+const TRASH_DAYS = 30;
 const MASK = '••••••••••••';
 
 const state = {
@@ -334,10 +336,13 @@ async function enterMain() {
 
 async function refresh() {
   state.overview = await invoke('overview');
-  if (state.collection && !state.overview.collections.some((c) => c.id === state.collection)) state.collection = null;
+  if (state.collection && state.collection !== TRASH && !state.overview.collections.some((c) => c.id === state.collection)) {
+    state.collection = null;
+  }
   renderSidebar();
   renderList();
-  if (state.entry && state.overview.entries.some((e) => e.id === state.entry)) await renderDetail();
+  const pool = inTrash() ? state.overview.trash : state.overview.entries;
+  if (state.entry && pool.some((e) => e.id === state.entry)) await renderDetail();
   else clearDetail();
 }
 
@@ -345,6 +350,8 @@ function renderSidebar() {
   const { collections, entries } = state.overview;
   $('#count-all').textContent = entries.length;
   $('[data-collection=""]').classList.toggle('active', state.collection === null);
+  $('[data-collection=trash]').classList.toggle('active', state.collection === TRASH);
+  $('#count-trash').textContent = state.overview.trash.length || '';
   $('#collection-list').replaceChildren(
     ...collections
       .slice()
@@ -363,10 +370,12 @@ function renderSidebar() {
   );
 }
 
+const inTrash = () => state.collection === TRASH;
+
 function visibleEntries() {
   const q = state.query.trim().toLowerCase();
-  return state.overview.entries
-    .filter((e) => state.collection === null || e.collection_id === state.collection)
+  return (inTrash() ? state.overview.trash : state.overview.entries)
+    .filter((e) => state.collection === null || inTrash() || e.collection_id === state.collection)
     .filter((e) => !q || [e.title, e.username, e.url].some((v) => v && v.toLowerCase().includes(q)))
     .sort((a, b) => a.title.localeCompare(b.title));
 }
@@ -374,7 +383,8 @@ function visibleEntries() {
 function renderList() {
   const rows = visibleEntries();
   const c = collectionById(state.collection);
-  $('#list-title').textContent = c ? c.name : t('All items');
+  $('#list-title').textContent = inTrash() ? t('Trash') : c ? c.name : t('All items');
+  $('#empty-trash').hidden = !inTrash() || state.overview.trash.length === 0;
   $('#edit-collection').hidden = c?.my_role !== 'owner';
   $('#share-collection').hidden = c?.my_role !== 'owner';
   const info = $('#collection-info');
@@ -384,9 +394,9 @@ function renderList() {
   } else if (c) {
     info.textContent = t('Shared with {names}', { names: c.members.filter((m) => !m.is_me).map((m) => m.name).join(', ') });
   }
-  $('#new-entry').disabled = c ? !canWrite(c) : writableCollections().length === 0;
+  $('#new-entry').disabled = inTrash() || (c ? !canWrite(c) : writableCollections().length === 0);
   $('#empty-list').hidden = rows.length > 0;
-  $('#empty-list').textContent = state.query ? t('No matches.') : t('No entries yet.');
+  $('#empty-list').textContent = state.query ? t('No matches.') : inTrash() ? t('The trash is empty.') : t('No entries yet.');
   $('#entry-list').replaceChildren(
     ...rows.map((e) =>
       h(
@@ -397,7 +407,7 @@ function renderList() {
           'div',
           { class: 'entry-text' },
           h('div', { class: 't', text: e.title }),
-          h('div', { class: 'u', text: e.username || (state.collection ? '' : collectionName(e.collection_id)) }),
+          h('div', { class: 'u', text: inTrash() ? daysLeft(e) : e.username || (state.collection ? '' : collectionName(e.collection_id)) }),
         ),
       ),
     ),
@@ -411,6 +421,24 @@ function selectCollection(id) {
   if ($('#screen-main').dataset.view === 'nav') backToList();
 }
 $('[data-collection=""]').addEventListener('click', () => selectCollection(null));
+$('[data-collection=trash]').addEventListener('click', () => selectCollection(TRASH));
+
+function daysLeft(e) {
+  const days = Math.max(0, Math.ceil((e.trashed_at + TRASH_DAYS * 86400 - Date.now() / 1000) / 86400));
+  return days === 1 ? t('Deleted for good tomorrow') : t('Deleted for good in {n} days', { n: days });
+}
+
+$('#empty-trash').addEventListener('click', async () => {
+  if (!(await confirmDialog(t('Delete everything in the trash for good? This can\'t be undone.'), t('Empty trash')))) return;
+  try {
+    const n = await invoke('empty_trash');
+    state.entry = null;
+    await refresh();
+    toast(t('{n} entries deleted for good', { n }));
+  } catch (err) {
+    toast(err);
+  }
+});
 
 $('#search').addEventListener('input', (e) => {
   state.query = e.target.value;
@@ -503,34 +531,130 @@ async function renderDetail() {
   if (e.notes) fields.push(field(t('Notes'), h('span', { text: e.notes })));
 
   const writable = canWrite(collectionById(e.collection_id));
+  const history = await invoke('entry_history', { id: e.id }).catch(() => []);
+  const trashed = e.trashed_at != null;
+  const actions = trashed
+    ? [
+        h('button', { class: 'primary', text: t('Restore'), onclick: () => restoreEntry(e) }),
+        h('button', { class: 'danger', text: t('Delete forever'), onclick: () => purgeEntry(e) }),
+      ]
+    : [
+        h('button', { text: t('Edit'), onclick: () => openEntryDialog(e) }),
+        history.length ? h('button', { text: t('History ({n})', { n: history.length }), onclick: () => openHistory(e) }) : null,
+        h('button', { class: 'danger', text: t('Delete'), onclick: () => deleteEntry(e) }),
+      ];
   $('#detail').replaceChildren(
     h('button', { class: 'link mobile-only back', text: t('‹ Back'), onclick: backToList }),
     h('div', { class: 'detail-head' }, avatar(e.title), h('div', {}, h('h2', { text: e.title }), h('div', { class: 'muted', text: collectionName(e.collection_id) }))),
     ...fields,
+    ...(trashed ? [h('p', { class: 'trash-note', text: t('In the trash.') + ' ' + daysLeft(e) })] : []),
     writable
-      ? h(
-          'div',
-          { class: 'detail-actions' },
-          h('button', { text: t('Edit'), onclick: () => openEntryDialog(e) }),
-          h('button', { class: 'danger', text: t('Delete'), onclick: () => deleteEntry(e) }),
-        )
+      ? h('div', { class: 'detail-actions' }, ...actions)
       : h('p', { class: 'muted small', text: t('View only: this collection is shared with you read-only.') }),
     h('div', { class: 'meta', text: t('Updated {date}', { date: new Date(e.updated_at * 1000).toLocaleString(lang) }) }),
   );
 }
 
 async function deleteEntry(e) {
-  if (!(await confirmDialog(t('Delete "{title}"? This can\'t be undone.', { title: e.title })))) return;
   try {
     await invoke('delete_entry', { id: e.id });
     state.entry = null;
     if ($('#screen-main').dataset.view === 'detail') backToList();
     await refresh();
-    toast(t('Entry deleted'));
+    toast(t('Moved to the trash'));
   } catch (err) {
     toast(String(err));
   }
 }
+
+async function restoreEntry(e) {
+  try {
+    await invoke('restore_entry', { id: e.id });
+    state.entry = null;
+    if ($('#screen-main').dataset.view === 'detail') backToList();
+    await refresh();
+    toast(t('Restored to "{name}"', { name: collectionName(e.collection_id) }));
+  } catch (err) {
+    toast(err);
+  }
+}
+
+async function purgeEntry(e) {
+  if (!(await confirmDialog(t('Delete "{title}" for good? This can\'t be undone.', { title: e.title }), t('Delete forever')))) return;
+  try {
+    await invoke('purge_entry', { id: e.id });
+    state.entry = null;
+    if ($('#screen-main').dataset.view === 'detail') backToList();
+    await refresh();
+    toast(t('Deleted for good'));
+  } catch (err) {
+    toast(err);
+  }
+}
+
+// --- entry history ---------------------------------------------------------------------
+
+const historyDialog = $('#history-dialog');
+
+async function openHistory(e) {
+  setError(historyDialog, '');
+  $('[data-title]', historyDialog).textContent = t('History of "{title}"', { title: e.title });
+  const list = await invoke('entry_history', { id: e.id });
+  const changes = (r) =>
+    [
+      r.title !== e.title && t('Title'),
+      (r.username ?? '') !== (e.username ?? '') && t('Username'),
+      r.password !== e.password && t('Password'),
+      (r.url ?? '') !== (e.url ?? '') && t('Website'),
+      (r.notes ?? '') !== (e.notes ?? '') && t('Notes'),
+      (r.totp ?? '') !== (e.totp ?? '') && t('One-time code'),
+    ].filter(Boolean);
+  $('[data-list]', historyDialog).replaceChildren(
+    ...list.map((r) => {
+      const pw = h('span', { class: 'mono', text: MASK });
+      let shown = false;
+      const diff = changes(r);
+      return h(
+        'li',
+        {},
+        h(
+          'div',
+          { class: 'who' },
+          h('div', { text: new Date(r.changed_at * 1000).toLocaleString(lang) }),
+          h('div', { class: 'sub', text: (r.by_me ? t('by you') : t('by {name}', { name: r.author_name })) + (diff.length ? ' · ' + t('differs in: {fields}', { fields: diff.join(', ') }) : '') }),
+          h('div', { class: 'rev-pw' }, pw, h('button', {
+            class: 'link',
+            text: t('Show'),
+            onclick: (ev) => {
+              shown = !shown;
+              pw.textContent = shown ? r.password : MASK;
+              ev.target.textContent = shown ? t('Hide') : t('Show');
+            },
+          })),
+        ),
+        canWrite(collectionById(e.collection_id))
+          ? h('button', {
+              text: t('Restore'),
+              onclick: async () => {
+                try {
+                  await invoke('restore_revision', { id: e.id, revision: r.id });
+                  historyDialog.close();
+                  await refresh();
+                  toast(t('Earlier version restored'));
+                } catch (err) {
+                  setError(historyDialog, err);
+                }
+              },
+            })
+          : null,
+      );
+    }),
+  );
+  historyDialog.showModal();
+}
+historyDialog.addEventListener('click', (ev) => {
+  if (ev.target.dataset?.action === 'close') historyDialog.close();
+});
 
 // --- entry dialog ---------------------------------------------------------------------
 

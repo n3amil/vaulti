@@ -4,7 +4,8 @@
 //! list, roles); every entry version is signed by its author. Merging keeps,
 //! per entry, the version with the highest [`Stamp`] whose signature is valid
 //! and whose author is a writer in the (merged) member list. Deletions are
-//! tombstones (`data: None`) so they win over stale copies.
+//! tombstones (`data: None`) so they win over stale copies. Moving an entry to
+//! the trash is an ordinary new version with `trashed_at` set.
 
 use std::collections::BTreeMap;
 
@@ -69,6 +70,10 @@ pub struct EntryData {
     /// before this field existed still verify byte-for-byte.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub totp: Option<String>,
+    /// Set when moved to the trash (unix seconds); restorable until purged.
+    /// Skipped when empty, like `totp`, so older signatures still verify.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,10 +91,18 @@ pub struct SignedEntry {
     pub sig: Vec<u8>,
 }
 
+/// Old versions kept per entry (newest first after merging).
+pub const HISTORY_LEN: usize = 10;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionDoc {
     pub meta: SignedMeta,
     pub entries: BTreeMap<Uuid, SignedEntry>,
+    /// Earlier versions per entry, each still signed by its author. Merging
+    /// takes the union, so an edit that lost to a concurrent newer one (two
+    /// people editing offline) ends up here instead of being lost.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub history: BTreeMap<Uuid, Vec<SignedEntry>>,
 }
 
 /// Collection key encrypted to one member.
@@ -143,12 +156,23 @@ pub fn verify_meta(cid: &Uuid, owner: &IdentityPublic, m: &SignedMeta) -> Result
 pub struct MergeStats {
     pub meta_updated: bool,
     pub entries_updated: usize,
+    pub history_added: usize,
     pub rejected: usize,
 }
 
 impl MergeStats {
     pub fn changed(&self) -> bool {
-        self.meta_updated || self.entries_updated > 0
+        self.meta_updated || self.entries_updated > 0 || self.history_added > 0
+    }
+}
+
+/// Same content, ignoring the trash flag (trashing and restoring aren't history).
+fn same_content(a: &EntryVersion, b: &EntryVersion) -> bool {
+    match (&a.data, &b.data) {
+        (Some(x), Some(y)) => {
+            EntryData { trashed_at: None, ..x.clone() } == EntryData { trashed_at: None, ..y.clone() }
+        }
+        _ => false,
     }
 }
 
@@ -159,6 +183,11 @@ impl CollectionDoc {
         verify_meta(cid, owner, &self.meta)?;
         for (eid, e) in &self.entries {
             self.check_entry(cid, eid, e)?;
+        }
+        for (eid, list) in &self.history {
+            for e in list {
+                self.check_entry(cid, eid, e)?;
+            }
         }
         Ok(())
     }
@@ -173,6 +202,49 @@ impl CollectionDoc {
         author.identity.verify(&entry_msg(cid, eid, &e.version), &e.sig)
     }
 
+    /// Sets the current version of an entry; the one it replaces goes to history.
+    pub fn put(&mut self, eid: Uuid, signed: SignedEntry) {
+        if let Some(old) = self.entries.insert(eid, signed) {
+            self.add_history(eid, old);
+        }
+        self.tidy_history(&eid);
+    }
+
+    /// Earlier versions of an entry, newest first.
+    pub fn history_of(&self, eid: &Uuid) -> &[SignedEntry] {
+        self.history.get(eid).map(Vec::as_slice).unwrap_or_default()
+    }
+
+    /// Returns true if the version was new to the history.
+    fn add_history(&mut self, eid: Uuid, v: SignedEntry) -> bool {
+        let list = self.history.entry(eid).or_default();
+        if v.version.data.is_none() || list.iter().any(|h| h.version.stamp == v.version.stamp) {
+            return false;
+        }
+        list.push(v);
+        true
+    }
+
+    /// Newest first, at most HISTORY_LEN, nothing newer than or equal to the
+    /// current version, and no history at all once an entry is deleted for good.
+    /// Deterministic, so every device converges on the same history.
+    fn tidy_history(&mut self, eid: &Uuid) {
+        let Some(cur) = self.entries.get(eid) else { return };
+        if cur.version.data.is_none() {
+            self.history.remove(eid);
+            return;
+        }
+        let cur = cur.version.clone();
+        let Some(list) = self.history.get_mut(eid) else { return };
+        list.retain(|h| h.version.stamp < cur.stamp && !same_content(&h.version, &cur));
+        list.sort_by_key(|h| std::cmp::Reverse(h.version.stamp));
+        list.dedup_by(|a, b| same_content(&a.version, &b.version));
+        list.truncate(HISTORY_LEN);
+        if list.is_empty() {
+            self.history.remove(eid);
+        }
+    }
+
     pub fn merge(&mut self, cid: &Uuid, owner: &IdentityPublic, other: CollectionDoc) -> MergeStats {
         let mut stats = MergeStats::default();
         if other.meta.meta.stamp > self.meta.meta.stamp {
@@ -183,16 +255,39 @@ impl CollectionDoc {
                 stats.rejected += 1;
             }
         }
+        let mut touched = Vec::new();
         for (eid, incoming) in other.entries {
-            if self.entries.get(&eid).is_some_and(|cur| cur.version.stamp >= incoming.version.stamp) {
+            let cur = self.entries.get(&eid);
+            if cur.is_some_and(|cur| cur.version.stamp == incoming.version.stamp) {
                 continue;
             }
-            if self.check_entry(cid, &eid, &incoming).is_ok() {
-                self.entries.insert(eid, incoming);
-                stats.entries_updated += 1;
-            } else {
+            if self.check_entry(cid, &eid, &incoming).is_err() {
                 stats.rejected += 1;
+                continue;
             }
+            if cur.is_some_and(|cur| cur.version.stamp > incoming.version.stamp) {
+                // Older than ours: keep it as history (a concurrent edit we'd otherwise lose).
+                if self.add_history(eid, incoming) {
+                    stats.history_added += 1;
+                }
+            } else {
+                self.put(eid, incoming);
+                stats.entries_updated += 1;
+            }
+            touched.push(eid);
+        }
+        for (eid, list) in other.history {
+            for h in list {
+                if self.check_entry(cid, &eid, &h).is_err() {
+                    stats.rejected += 1;
+                } else if self.add_history(eid, h) {
+                    stats.history_added += 1;
+                }
+            }
+            touched.push(eid);
+        }
+        for eid in touched {
+            self.tidy_history(&eid);
         }
         stats
     }
@@ -220,6 +315,7 @@ mod tests {
             notes: None,
             created_at: 0,
             totp: None,
+            trashed_at: None,
         })
     }
 
@@ -253,7 +349,11 @@ mod tests {
                 ],
                 stamp: self.clock.tick(),
             };
-            CollectionDoc { meta: sign_meta(&self.owner, &self.cid, meta), entries: BTreeMap::new() }
+            CollectionDoc {
+                meta: sign_meta(&self.owner, &self.cid, meta),
+                entries: BTreeMap::new(),
+                history: BTreeMap::new(),
+            }
         }
 
         fn entry(&mut self, author: &Identity, title: &str) -> SignedEntry {
@@ -307,7 +407,11 @@ mod tests {
         let mut meta = doc.meta.meta.clone();
         meta.stamp = f.clock.tick();
         meta.members.retain(|m| m.role != Role::Viewer);
-        let forged = CollectionDoc { meta: sign_meta(&f.editor, &f.cid, meta), entries: BTreeMap::new() };
+        let forged = CollectionDoc {
+            meta: sign_meta(&f.editor, &f.cid, meta),
+            entries: BTreeMap::new(),
+            history: BTreeMap::new(),
+        };
         let s = doc.merge(&f.cid, &f.owner.public(), forged);
         assert!(!s.meta_updated);
         assert_eq!(doc.meta.meta.members.len(), 3);

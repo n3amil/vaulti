@@ -20,6 +20,11 @@ impl Stamp {
     pub fn secs(&self) -> u64 {
         self.ms / 1000
     }
+
+    /// Unique text form, e.g. to name one version of an entry.
+    pub fn id(&self) -> String {
+        format!("{}-{}-{}", self.ms, self.ctr, self.device.simple())
+    }
 }
 
 fn now_ms() -> u64 {

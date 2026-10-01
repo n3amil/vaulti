@@ -24,6 +24,6 @@ pub use collection::{Member, Role};
 pub use crypto::KdfParams;
 pub use error::{Error, Result};
 pub use identity::{IdentityPublic, UserId};
-pub use model::{Collection, DeviceView, Entry, EntryInput};
+pub use model::{now, Collection, DeviceView, Entry, EntryInput, Revision};
 pub use recovery::BackupCode;
 pub use vault::{FileV2, Peer, SyncMessage, SyncReport, Vault, VaultFile};

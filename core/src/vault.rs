@@ -26,7 +26,7 @@ use crate::crypto::{derive_key, fill_random, open, random_salt, seal, KdfParams,
 use crate::error::{Error, Result};
 use crate::identity::{device_node_id, Identity, IdentityPublic, UserId};
 use crate::legacy::{self, FileV1};
-use crate::model::{now, Collection, DeviceView, Entry, EntryInput};
+use crate::model::{now, Collection, DeviceView, Entry, EntryInput, Revision};
 use crate::recovery::BackupCode;
 use crate::stamp::{Clock, Stamp};
 
@@ -351,6 +351,7 @@ impl Vault {
                     notes: e.notes,
                     created_at: e.created_at,
                     totp: None,
+                    trashed_at: None,
                 };
                 vault.put_entry(c.id, e.id, Some(data))?;
             }
@@ -572,7 +573,11 @@ impl Vault {
             members: vec![self.me_as_member(Role::Owner)],
             stamp: self.clock.tick(),
         };
-        let doc = CollectionDoc { meta: sign_meta(&self.identity, &id, meta), entries: Default::default() };
+        let doc = CollectionDoc {
+            meta: sign_meta(&self.identity, &id, meta),
+            entries: Default::default(),
+            history: Default::default(),
+        };
         let keys = vec![KeyWrap {
             recipient: self.user_id(),
             sealed: self.identity_public.seal_to(key.as_bytes(), &aad_key(&id))?,
@@ -690,7 +695,7 @@ impl Vault {
         let version = EntryVersion { stamp: self.clock.tick(), author: me.clone(), data };
         let signed = sign_entry(&self.identity, &cid, &eid, version);
         let oc = self.open_mut(cid)?;
-        oc.doc.entries.insert(eid, signed);
+        oc.doc.put(eid, signed);
         oc.view = build_view(cid, &oc.owner, &oc.doc, &me);
         Ok(())
     }
@@ -705,6 +710,7 @@ impl Vault {
             notes: input.notes,
             created_at: now(),
             totp: check_totp(input.totp)?,
+            trashed_at: None,
         };
         self.put_entry(collection, id, Some(data))?;
         Ok(id)
@@ -721,15 +727,100 @@ impl Vault {
             notes: input.notes,
             created_at,
             totp: check_totp(input.totp)?,
+            trashed_at: None,
         };
         self.put_entry(cid, id, Some(data))
     }
 
+    /// Deletes for good (a tombstone), whether the entry is in the trash or not.
     pub fn remove_entry(&mut self, id: Uuid) -> Result<Entry> {
-        let (c, e) = self.entry(id).ok_or(Error::EntryNotFound)?;
+        let (c, e) = self.entry(id).or_else(|| self.trashed_entry(id)).ok_or(Error::EntryNotFound)?;
         let (cid, old) = (c.id, e.clone());
         self.put_entry(cid, id, None)?;
         Ok(old)
+    }
+
+    /// Entries in the trash, with their collection.
+    pub fn trashed_entries(&self) -> impl Iterator<Item = (&Collection, &Entry)> {
+        self.collections().flat_map(|c| c.trash.iter().map(move |e| (c, e)))
+    }
+
+    pub fn trashed_entry(&self, id: Uuid) -> Option<(&Collection, &Entry)> {
+        self.trashed_entries().find(|(_, e)| e.id == id)
+    }
+
+    /// Moves an entry to the trash. It syncs like any edit, so it is in the
+    /// trash on every device and for everyone the collection is shared with.
+    pub fn trash_entry(&mut self, id: Uuid) -> Result<Entry> {
+        let (c, e) = self.entry(id).ok_or(Error::EntryNotFound)?;
+        let (cid, old) = (c.id, e.clone());
+        self.put_entry(cid, id, Some(entry_data(&old, Some(now()))))?;
+        Ok(old)
+    }
+
+    pub fn restore_entry(&mut self, id: Uuid) -> Result<()> {
+        let (c, e) = self.trashed_entry(id).ok_or(Error::EntryNotFound)?;
+        let (cid, data) = (c.id, entry_data(e, None));
+        self.put_entry(cid, id, Some(data))
+    }
+
+    /// Earlier versions of an entry (current or trashed), newest first.
+    pub fn entry_history(&self, id: Uuid) -> Result<Vec<Revision>> {
+        let (c, _) = self.entry(id).or_else(|| self.trashed_entry(id)).ok_or(Error::EntryNotFound)?;
+        let oc = self.collections.iter().find(|oc| oc.view.id == c.id).ok_or(Error::CollectionNotFound)?;
+        let name = |uid: &UserId| oc.doc.meta.meta.member(uid).map(|m| m.name.clone()).unwrap_or_default();
+        Ok(oc
+            .doc
+            .history_of(&id)
+            .iter()
+            .filter_map(|h| {
+                let d = h.version.data.as_ref()?;
+                Some(Revision {
+                    id: h.version.stamp.id(),
+                    changed_at: h.version.stamp.secs(),
+                    author_name: name(&h.version.author),
+                    by_me: h.version.author == self.user_id(),
+                    title: d.title.clone(),
+                    username: d.username.clone(),
+                    password: d.password.clone(),
+                    url: d.url.clone(),
+                    notes: d.notes.clone(),
+                    totp: d.totp.clone(),
+                })
+            })
+            .collect())
+    }
+
+    /// Makes an earlier version current again (the current one goes to history).
+    pub fn restore_revision(&mut self, id: Uuid, revision: &str) -> Result<()> {
+        let rev = self.entry_history(id)?.into_iter().find(|r| r.id == revision).ok_or(Error::EntryNotFound)?;
+        let (c, e) = self.entry(id).or_else(|| self.trashed_entry(id)).ok_or(Error::EntryNotFound)?;
+        let cid = c.id;
+        let data = EntryData {
+            title: rev.title,
+            username: rev.username,
+            password: rev.password,
+            url: rev.url,
+            notes: rev.notes,
+            created_at: e.created_at,
+            totp: rev.totp,
+            trashed_at: None,
+        };
+        self.put_entry(cid, id, Some(data))
+    }
+
+    /// Deletes trashed entries for good that were trashed before `before`
+    /// (unix seconds), in collections we can write to. Returns how many.
+    pub fn empty_trash(&mut self, before: u64) -> Result<usize> {
+        let due: Vec<Uuid> = self
+            .trashed_entries()
+            .filter(|(c, e)| c.can_write() && e.trashed_at.is_some_and(|t| t < before))
+            .map(|(_, e)| e.id)
+            .collect();
+        for id in &due {
+            self.remove_entry(*id)?;
+        }
+        Ok(due.len())
     }
 
     // --- backups -------------------------------------------------------------------
@@ -804,6 +895,7 @@ impl Vault {
                     notes: be.notes,
                     created_at: be.created_at,
                     totp: check_totp(be.totp).unwrap_or(None),
+                    trashed_at: None,
                 };
                 self.put_entry(cid, Uuid::new_v4(), Some(data))?;
                 report.entries_added += 1;
@@ -947,9 +1039,22 @@ fn check_totp(totp: Option<String>) -> Result<Option<String>> {
     }
 }
 
+fn entry_data(e: &Entry, trashed_at: Option<u64>) -> EntryData {
+    EntryData {
+        title: e.title.clone(),
+        username: e.username.clone(),
+        password: e.password.clone(),
+        url: e.url.clone(),
+        notes: e.notes.clone(),
+        created_at: e.created_at,
+        totp: e.totp.clone(),
+        trashed_at,
+    }
+}
+
 fn build_view(id: Uuid, owner: &IdentityPublic, doc: &CollectionDoc, me: &UserId) -> Collection {
     let meta = &doc.meta.meta;
-    let entries: Vec<Entry> = doc
+    let (trash, entries): (Vec<Entry>, Vec<Entry>) = doc
         .entries
         .iter()
         .filter_map(|(eid, e)| {
@@ -964,14 +1069,16 @@ fn build_view(id: Uuid, owner: &IdentityPublic, doc: &CollectionDoc, me: &UserId
                 created_at: d.created_at,
                 updated_at: e.version.stamp.secs(),
                 totp: d.totp.clone(),
+                trashed_at: d.trashed_at,
             })
         })
-        .collect();
+        .partition(|e| e.trashed_at.is_some());
     Collection {
         id,
         name: meta.name.clone(),
         updated_at: doc.max_stamp().secs(),
         entries,
+        trash,
         owner: owner.user_id(),
         members: meta.members.clone(),
         my_role: meta.member(me).map(|m| m.role),

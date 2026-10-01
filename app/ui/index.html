@@ -91,6 +91,7 @@
       <button class="nav-item" data-collection=""><span data-i18n="All items">All items</span> <span class="count" id="count-all"></span></button>
       <div class="nav-heading"><span data-i18n="Collections">Collections</span> <button class="icon" id="new-collection" title="New collection" data-i18n-title="New collection">+</button></div>
       <div id="collection-list"></div>
+      <button class="nav-item" data-collection="trash"><span data-i18n="Trash">Trash</span> <span class="count" id="count-trash"></span></button>
       <div class="spacer"></div>
       <button class="nav-item" id="open-devices" data-i18n="Devices">Devices</button>
       <button class="nav-item" id="open-contacts" data-i18n="Contacts">Contacts</button>
@@ -108,6 +109,7 @@
       <div class="list-title">
         <h2 id="list-title" data-i18n="All items">All items</h2>
         <span class="row">
+          <button class="link danger" id="empty-trash" hidden data-i18n="Empty trash">Empty trash</button>
           <button class="link" id="share-collection" hidden data-i18n="Share">Share</button>
           <button class="link" id="edit-collection" hidden data-i18n="Edit">Edit</button>
         </span>
@@ -355,6 +357,17 @@
         <span class="row"><button type="submit" class="primary" data-submit data-i18n="Check card">Check card</button></span>
       </form>
       <ul class="contact-list" data-contacts></ul>
+      <div class="actions"><button data-action="close" data-i18n="Close">Close</button></div>
+    </div>
+  </dialog>
+
+  <!-- Entry history -->
+  <dialog id="history-dialog" class="wide">
+    <div>
+      <h2 data-title></h2>
+      <p class="muted" data-i18n="Earlier versions of this entry, including changes others made at the same time. Restoring one keeps the current version in the history.">Earlier versions of this entry, including changes others made at the same time. Restoring one keeps the current version in the history.</p>
+      <ul class="history-list" data-list></ul>
+      <p class="error" data-error></p>
       <div class="actions"><button data-action="close" data-i18n="Close">Close</button></div>
     </div>
   </dialog>

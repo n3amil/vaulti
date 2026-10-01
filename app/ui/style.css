@@ -291,7 +291,13 @@ dialog::backdrop { background: rgba(10, 12, 25, .28); -webkit-backdrop-filter: b
 dialog.wide { width: min(620px, calc(100vw - 32px)); }
 dialog h3 { margin-top: 20px; }
 
-.member-list, .device-list, .contact-list { list-style: none; margin: 14px 0 0; padding: 0; }
+.member-list, .device-list, .contact-list, .history-list { list-style: none; margin: 14px 0 0; padding: 0; }
+.history-list li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--glass-line); }
+.history-list li:first-child { border-top: none; }
+.history-list .who { flex: 1; min-width: 0; }
+.rev-pw { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.rev-pw .mono { overflow-wrap: anywhere; }
+.trash-note { margin: 16px 0 0; padding: 10px 14px; border-radius: var(--radius); background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); font-size: 13px; }
 .member-list li, .device-list li, .contact-list li {
   display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--glass-line);
 }

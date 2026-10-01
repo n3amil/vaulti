@@ -269,9 +269,19 @@ struct EntrySummary {
 }
 
 #[derive(Serialize)]
+struct TrashSummary {
+    id: Uuid,
+    collection_id: Uuid,
+    title: String,
+    username: Option<String>,
+    trashed_at: u64,
+}
+
+#[derive(Serialize)]
 struct Overview {
     collections: Vec<CollectionView>,
     entries: Vec<EntrySummary>,
+    trash: Vec<TrashSummary>,
 }
 
 #[derive(Serialize)]
@@ -416,7 +426,8 @@ async fn unlock(app: AppHandle, state: State<'_, AppState>, password: String) ->
     let path = state.path.clone();
     let vault = blocking(move || {
         let file = store::load(&path).map_err(err)?;
-        let vault = Vault::unlock(file, &password).map_err(|_| "Wrong master password".to_string())?;
+        let mut vault = Vault::unlock(file, &password).map_err(|_| "Wrong master password".to_string())?;
+        purge_old_trash(&mut vault);
         // Persists migrations from older formats right away.
         store::save(&path, &vault.to_file().map_err(err)?).map_err(err)?;
         Ok(vault)
@@ -572,6 +583,16 @@ fn overview(state: State<AppState>) -> CmdResult<Overview> {
                     updated_at: e.updated_at,
                 })
                 .collect(),
+            trash: v
+                .trashed_entries()
+                .map(|(c, e)| TrashSummary {
+                    id: e.id,
+                    collection_id: c.id,
+                    title: e.title.clone(),
+                    username: e.username.clone(),
+                    trashed_at: e.trashed_at.unwrap_or_default(),
+                })
+                .collect(),
         })
     })
 }
@@ -579,7 +600,7 @@ fn overview(state: State<AppState>) -> CmdResult<Overview> {
 #[tauri::command]
 fn get_entry(state: State<AppState>, id: Uuid) -> CmdResult<EntryDetail> {
     state.read(|v| {
-        let (c, e) = v.entry(id).ok_or("Entry not found")?;
+        let (c, e) = v.entry(id).or_else(|| v.trashed_entry(id)).ok_or("Entry not found")?;
         Ok(EntryDetail { entry: e.clone(), collection_id: c.id })
     })
 }
@@ -611,9 +632,44 @@ fn update_entry(state: State<AppState>, id: Uuid, collection_id: Uuid, entry: En
     })
 }
 
+/// Moves to the trash; `purge_entry` deletes for good.
 #[tauri::command]
 fn delete_entry(state: State<AppState>, id: Uuid) -> CmdResult<()> {
+    state.mutate(|v| v.trash_entry(id).map(|_| ()))
+}
+
+#[tauri::command]
+fn restore_entry(state: State<AppState>, id: Uuid) -> CmdResult<()> {
+    state.mutate(|v| v.restore_entry(id))
+}
+
+#[tauri::command]
+fn purge_entry(state: State<AppState>, id: Uuid) -> CmdResult<()> {
     state.mutate(|v| v.remove_entry(id).map(|_| ()))
+}
+
+/// Deletes everything in the trash that we may delete; returns how many.
+#[tauri::command]
+fn empty_trash(state: State<AppState>) -> CmdResult<usize> {
+    state.mutate(|v| v.empty_trash(u64::MAX))
+}
+
+#[tauri::command]
+fn entry_history(state: State<AppState>, id: Uuid) -> CmdResult<Vec<vaulti_core::Revision>> {
+    state.read(|v| v.entry_history(id).map_err(err))
+}
+
+#[tauri::command]
+fn restore_revision(state: State<AppState>, id: Uuid, revision: String) -> CmdResult<()> {
+    state.mutate(|v| v.restore_revision(id, &revision))
+}
+
+/// Entries stay in the trash this long, then are deleted for good on unlock.
+const TRASH_DAYS: u64 = 30;
+
+fn purge_old_trash(vault: &mut Vault) {
+    let cutoff = vaulti_core::now().saturating_sub(TRASH_DAYS * 24 * 3600);
+    let _ = vault.empty_trash(cutoff);
 }
 
 #[tauri::command]
@@ -913,6 +969,11 @@ pub fn run() {
             add_entry,
             update_entry,
             delete_entry,
+            restore_entry,
+            purge_entry,
+            empty_trash,
+            entry_history,
+            restore_revision,
             create_collection,
             rename_collection,
             delete_collection,
