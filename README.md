@@ -61,15 +61,15 @@ Runtime deps: `libwebkit2gtk-4.1-0`, `libgtk-3-0`. Uses the same vault file as t
 
 ### Flatpak
 
-`flatpak/dev.vaulti.Vaulti.yml` repackages the binary from the .deb on the GNOME 49 runtime
+`flatpak/io.github.n3amil.Vaulti.yml` repackages the binary from the .deb on the GNOME 49 runtime
 (all linked libraries are in the runtime, nothing is bundled). Built in CI, see below.
 
 ```sh
 flatpak install --user Vaulti.flatpak   # from a release / workflow artifact
-flatpak run dev.vaulti.Vaulti
+flatpak run io.github.n3amil.Vaulti
 ```
 
-Inside the Flatpak the vault lives in `~/.var/app/dev.vaulti.Vaulti/data/vaulti/vault.json`
+Inside the Flatpak the vault lives in `~/.var/app/io.github.n3amil.Vaulti/data/vaulti/vault.json`
 (separate from the CLI's `~/.local/share/vaulti/vault.json`).
 Auto-locks after 5 min idle; copied passwords are cleared from the clipboard after 30 s.
 Shortcuts: Ctrl+F search, Ctrl+N new entry, Ctrl+C copy password, Ctrl+L lock.

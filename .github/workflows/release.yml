@@ -35,7 +35,7 @@ jobs:
       - run: cp dist/*.deb flatpak/vaulti.deb
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          manifest-path: flatpak/dev.vaulti.Vaulti.yml
+          manifest-path: flatpak/io.github.n3amil.Vaulti.yml
           bundle: Vaulti.flatpak
           cache-key: flatpak-builder-${{ github.sha }}
           upload-artifact: true

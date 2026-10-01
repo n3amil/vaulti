@@ -6,7 +6,7 @@
 #
 # Before building: cp dist/Vaulti_*_amd64.deb flatpak/vaulti.deb
 # CI does this in .github/workflows/release.yml.
-id: dev.vaulti.Vaulti
+id: io.github.n3amil.Vaulti
 runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
@@ -25,12 +25,12 @@ modules:
       - type: file
         path: vaulti.deb
       - type: file
-        path: dev.vaulti.Vaulti.metainfo.xml
+        path: io.github.n3amil.Vaulti.metainfo.xml
     build-commands:
       - ar -x vaulti.deb
       - tar -xf data.tar.gz
       - install -Dm755 usr/bin/vaulti-app /app/bin/vaulti-app
-      - install -Dm644 usr/share/applications/Vaulti.desktop /app/share/applications/dev.vaulti.Vaulti.desktop
-      - desktop-file-edit --set-icon=dev.vaulti.Vaulti /app/share/applications/dev.vaulti.Vaulti.desktop
-      - for s in 32x32 128x128 512x512; do install -Dm644 usr/share/icons/hicolor/$s/apps/vaulti-app.png /app/share/icons/hicolor/$s/apps/dev.vaulti.Vaulti.png; done
-      - install -Dm644 dev.vaulti.Vaulti.metainfo.xml /app/share/metainfo/dev.vaulti.Vaulti.metainfo.xml
+      - install -Dm644 usr/share/applications/Vaulti.desktop /app/share/applications/io.github.n3amil.Vaulti.desktop
+      - desktop-file-edit --set-icon=io.github.n3amil.Vaulti /app/share/applications/io.github.n3amil.Vaulti.desktop
+      - for s in 32x32 128x128 512x512; do install -Dm644 usr/share/icons/hicolor/$s/apps/vaulti-app.png /app/share/icons/hicolor/$s/apps/io.github.n3amil.Vaulti.png; done
+      - install -Dm644 io.github.n3amil.Vaulti.metainfo.xml /app/share/metainfo/io.github.n3amil.Vaulti.metainfo.xml

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>dev.vaulti.Vaulti</id>
+  <id>io.github.n3amil.Vaulti</id>
   <name>Vaulti</name>
   <summary>Peer-to-peer password manager</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
-  <developer id="dev.vaulti">
+  <developer id="io.github.n3amil">
     <name>Vaulti</name>
   </developer>
   <description>
@@ -22,7 +22,7 @@
     </ul>
   </description>
   <url type="homepage">https://github.com/n3amil/vaulti</url>
-  <launchable type="desktop-id">dev.vaulti.Vaulti.desktop</launchable>
+  <launchable type="desktop-id">io.github.n3amil.Vaulti.desktop</launchable>
   <categories>
     <category>Utility</category>
   </categories>
