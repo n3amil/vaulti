@@ -58,6 +58,19 @@ sudo apt install ./dist/Vaulti_0.1.0_amd64.deb
 ```
 
 Runtime deps: `libwebkit2gtk-4.1-0`, `libgtk-3-0`. Uses the same vault file as the CLI.
+
+### Flatpak
+
+`flatpak/dev.vaulti.Vaulti.yml` repackages the binary from the .deb on the GNOME 49 runtime
+(all linked libraries are in the runtime, nothing is bundled). Built in CI, see below.
+
+```sh
+flatpak install --user Vaulti.flatpak   # from a release / workflow artifact
+flatpak run dev.vaulti.Vaulti
+```
+
+Inside the Flatpak the vault lives in `~/.var/app/dev.vaulti.Vaulti/data/vaulti/vault.json`
+(separate from the CLI's `~/.local/share/vaulti/vault.json`).
 Auto-locks after 5 min idle; copied passwords are cleared from the clipboard after 30 s.
 Shortcuts: Ctrl+F search, Ctrl+N new entry, Ctrl+C copy password, Ctrl+L lock.
 
@@ -91,6 +104,16 @@ vaulti members work | unshare work alice
 Vault file: `~/.local/share/vaulti/vault.json` (override with `--vault` / `VAULTI_VAULT`).
 For scripting: `VAULTI_PASSWORD`, `VAULTI_NEW_PASSWORD`, `VAULTI_BACKUP_CODE`;
 debug builds also honour `VAULTI_INSECURE_KDF=1`.
+
+## CI / releases (GitHub Actions)
+
+- `ci.yml`: every push to `main` and every PR: fmt, clippy (`-D warnings`), all tests.
+- `release.yml`: push a tag `v*` (or run it manually): builds the .deb (same Docker build as
+  locally), then the Flatpak bundle, and attaches both to a draft GitHub release.
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
 
 ## Development
 

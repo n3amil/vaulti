@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.vaulti.Vaulti</id>
+  <name>Vaulti</name>
+  <summary>Peer-to-peer password manager</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <developer id="dev.vaulti">
+    <name>Vaulti</name>
+  </developer>
+  <description>
+    <p>
+      Vaulti is a password manager without a central server. Your devices sync
+      directly with each other, and you can share collections of passwords with
+      other people.
+    </p>
+    <ul>
+      <li>End-to-end encrypted with your master password; recover with a backup code</li>
+      <li>Pair devices with a QR code and a confirmation code</li>
+      <li>Share collections with contacts as editor or viewer</li>
+      <li>Copied passwords are cleared from the clipboard after 30 seconds</li>
+    </ul>
+  </description>
+  <url type="homepage">https://github.com/n3amil/vaulti</url>
+  <launchable type="desktop-id">dev.vaulti.Vaulti.desktop</launchable>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-01">
+      <description>
+        <p>First release: local vault, device sync and collection sharing.</p>
+      </description>
+    </release>
+  </releases>
+</component>

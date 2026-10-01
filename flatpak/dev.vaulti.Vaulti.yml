@@ -1,0 +1,36 @@
+# Flatpak for the Linux desktop app.
+#
+# Repackages the binary from the .deb (built in Docker by scripts/docker.sh deb)
+# instead of compiling inside flatpak-builder, so the build needs no network
+# and no vendored crates. All libraries it links are in the GNOME runtime.
+#
+# Before building: cp dist/Vaulti_*_amd64.deb flatpak/vaulti.deb
+# CI does this in .github/workflows/release.yml.
+id: dev.vaulti.Vaulti
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: vaulti-app
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # P2P sync with your other devices and contacts (iroh, mDNS on the LAN).
+  - --share=network
+modules:
+  - name: vaulti
+    buildsystem: simple
+    sources:
+      - type: file
+        path: vaulti.deb
+      - type: file
+        path: dev.vaulti.Vaulti.metainfo.xml
+    build-commands:
+      - ar -x vaulti.deb
+      - tar -xf data.tar.gz
+      - install -Dm755 usr/bin/vaulti-app /app/bin/vaulti-app
+      - install -Dm644 usr/share/applications/Vaulti.desktop /app/share/applications/dev.vaulti.Vaulti.desktop
+      - desktop-file-edit --set-icon=dev.vaulti.Vaulti /app/share/applications/dev.vaulti.Vaulti.desktop
+      - for s in 32x32 128x128 512x512; do install -Dm644 usr/share/icons/hicolor/$s/apps/vaulti-app.png /app/share/icons/hicolor/$s/apps/dev.vaulti.Vaulti.png; done
+      - install -Dm644 dev.vaulti.Vaulti.metainfo.xml /app/share/metainfo/dev.vaulti.Vaulti.metainfo.xml

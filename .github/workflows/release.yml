@@ -1,0 +1,62 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the .deb and .flatpak and publish a
+# (draft) GitHub release. Run manually to just get the artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Same Docker build as locally (Debian bookworm, glibc 2.36).
+      - run: scripts/docker.sh deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  flatpak:
+    needs: deb
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: dist
+      - run: cp dist/*.deb flatpak/vaulti.deb
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: flatpak/dev.vaulti.Vaulti.yml
+          bundle: Vaulti.flatpak
+          cache-key: flatpak-builder-${{ github.sha }}
+          upload-artifact: true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deb, flatpak]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: |
+          mkdir out
+          cp artifacts/deb/*.deb out/
+          find artifacts -name '*.flatpak' -exec cp {} out/ \;
+          ls -lh out
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: out/*
+          generate_release_notes: true

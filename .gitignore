@@ -3,3 +3,8 @@
 /dist
 node_modules/
 /app/src-tauri/gen
+/flatpak/vaulti.deb
+.flatpak-builder/
+/flatpak/build-dir
+/flatpak/repo
+*.flatpak
