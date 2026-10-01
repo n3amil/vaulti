@@ -39,7 +39,7 @@ jobs:
         working-directory: app
         run: |
           tauri android init --ci
-          tauri icon src-tauri/icons/icon.png
+          tauri icon icon.png
 
       - name: Build APK
         working-directory: app

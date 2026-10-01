@@ -24,10 +24,9 @@ run() {
 # Files the container creates in the bind mount belong to root; hand them back.
 CHOWN='chown -R "$HOST_UID:$HOST_GID" /src/dist /src/app/src-tauri/gen /src/app/src-tauri/icons 2>/dev/null || true'
 
-# App icons are generated from app/icon.svg once and committed.
+# App icons are generated from app/icon.png (1024px) once and committed.
 ICONS='if [ ! -f /src/app/src-tauri/icons/icon.png ]; then
-        rsvg-convert -w 1024 -h 1024 /src/app/icon.svg -o /tmp/icon.png
-        (cd /src/app && tauri icon /tmp/icon.png -o src-tauri/icons)
+        (cd /src/app && tauri icon icon.png -o src-tauri/icons)
     fi'
 
 case "${1:-}" in
