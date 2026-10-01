@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Vaulti",
+  "description": "Peer-to-peer password manager: fill logins from your Vaulti vault.",
+  "version": "0.1.0",
+  "action": { "default_popup": "popup.html", "default_title": "Vaulti" },
+  "icons": { "32": "icons/32.png", "128": "icons/128.png" },
+  "permissions": ["storage", "activeTab", "scripting", "alarms", "clipboardWrite"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

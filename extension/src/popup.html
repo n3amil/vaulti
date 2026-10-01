@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <!-- First run: pair this browser with another device -->
+  <section id="screen-pair" hidden>
+    <h1 data-i18n="Pair this browser">Pair this browser</h1>
+    <p class="muted" data-i18n="On your computer or phone open **Devices → Pair new device**, copy the pairing code and paste it here.">On your computer or phone open <b>Devices → Pair new device</b>, copy the pairing code and paste it here.</p>
+    <form id="pair-form">
+      <label><span data-i18n="Pairing code">Pairing code</span>
+        <textarea name="ticket" rows="3" class="mono" spellcheck="false" placeholder="vaulti-pair:…" required></textarea></label>
+      <label><span data-i18n="Name for this device">Name for this device</span> <input name="device" autocomplete="off"></label>
+      <div class="code-box" id="pair-code" hidden>
+        <p class="muted" data-i18n="Confirm on your other device that it shows:">Confirm on your other device that it shows:</p>
+        <div class="pair-code" data-code></div>
+      </div>
+      <p class="error" data-error></p>
+      <button class="primary" type="submit" data-submit data-i18n="Connect">Connect</button>
+    </form>
+  </section>
+
+  <!-- Locked (also: first unlock after pairing) -->
+  <section id="screen-lock" hidden>
+    <h1 data-i18n="Vaulti is locked">Vaulti is locked</h1>
+    <p class="muted" id="lock-hint" hidden data-i18n="Received your vault. Unlock it with your master password.">Received your vault. Unlock it with your master password.</p>
+    <form id="unlock-form">
+      <label><span data-i18n="Master password">Master password</span> <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+      <p class="error" data-error></p>
+      <button class="primary" type="submit" data-i18n="Unlock">Unlock</button>
+    </form>
+  </section>
+
+  <!-- Unlocked -->
+  <section id="screen-main" hidden>
+    <header>
+      <input type="search" id="search" data-i18n-placeholder="Search" placeholder="Search" autocomplete="off" spellcheck="false">
+      <button class="icon" id="lock" data-i18n-title="Lock" title="Lock">🔒</button>
+    </header>
+    <h2 id="list-title"></h2>
+    <ul id="entries"></ul>
+    <p class="muted empty" id="empty" hidden></p>
+    <footer><span class="dot" id="sync-dot"></span><span id="sync-text"></span></footer>
+  </section>
+
+  <div id="toast" class="toast" hidden></div>
+</body>
+</html>

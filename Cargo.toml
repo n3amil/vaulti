@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "sync", "cli", "app/src-tauri"]
+members = ["core", "sync", "cli", "app/src-tauri", "extension/wasm"]
 # Host builds skip the app (needs WebKitGTK); build it via scripts/docker.sh.
 default-members = ["core", "sync", "cli"]
 

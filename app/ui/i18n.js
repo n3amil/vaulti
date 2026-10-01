@@ -172,6 +172,18 @@ const de = {
   'differs in: {fields}': 'anders: {fields}',
   'Earlier version restored': 'Frühere Version wiederhergestellt',
 
+  // browser extension
+  'Pair this browser': 'Diesen Browser koppeln',
+  'On your computer or phone open **Devices → Pair new device**, copy the pairing code and paste it here.':
+    'Öffne auf deinem Computer oder Handy **Geräte → Neues Gerät koppeln**, kopiere den Kopplungscode und füge ihn hier ein.',
+  'All logins': 'Alle Logins',
+  'Logins for {site}': 'Logins für {site}',
+  'No logins for this site. Search to find others.': 'Keine Logins für diese Seite. Suche, um andere zu finden.',
+  'Fill': 'Ausfüllen',
+  'Code': 'Code',
+  'No login form found on this page': 'Auf dieser Seite wurde kein Anmeldeformular gefunden',
+  'Synced with {n} devices': 'Mit {n} Geräten synchronisiert',
+
   // settings
   'Language': 'Sprache',
   'Automatic': 'Automatisch',

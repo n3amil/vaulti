@@ -1,0 +1,23 @@
+[package]
+name = "vaulti-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vaulti for the browser extension: the vault and P2P sync as WebAssembly"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vaulti-core.workspace = true
+vaulti-sync.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+url = "2"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"

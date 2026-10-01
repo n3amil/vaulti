@@ -8,3 +8,5 @@ node_modules/
 /flatpak/build-dir
 /flatpak/repo
 *.flatpak
+/extension/pkg
+/extension/dist

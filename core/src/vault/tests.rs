@@ -592,3 +592,15 @@ fn digests_match_after_sync_and_flag_only_changed_collections() {
     theirs.insert(Uuid::new_v4(), "x".into());
     assert_eq!(laptop.differing(&peer, &theirs).unwrap().len(), 1);
 }
+
+#[test]
+fn session_key_unlocks_without_password() {
+    let (mut v, _) = Vault::create("pw", kdf()).unwrap();
+    v.add_entry(personal(&v), sample("a")).unwrap();
+    let key = v.session_key();
+    let again = Vault::unlock_with_session_key(roundtrip(&v), &key).unwrap();
+    assert_eq!(again.entries().count(), 1);
+    let (other, _) = Vault::create("pw", kdf()).unwrap();
+    assert!(Vault::unlock_with_session_key(roundtrip(&v), &other.session_key()).is_err());
+    assert!(Vault::unlock_with_session_key(roundtrip(&v), b"short").is_err());
+}

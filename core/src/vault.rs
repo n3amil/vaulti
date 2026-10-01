@@ -230,6 +230,20 @@ impl Vault {
     /// Unlocks with the backup code only. Follow up with
     /// [`change_password`](Self::change_password) and
     /// [`rotate_backup_code`](Self::rotate_backup_code); [`recover`](Self::recover) does all three.
+    /// The vault's root key, so a browser extension can keep the vault
+    /// unlocked for a while in session-only memory without the password.
+    pub fn session_key(&self) -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(self.root.as_bytes().to_vec())
+    }
+
+    /// Unlocks with a key from [`Self::session_key`]. Fails if it doesn't fit.
+    pub fn unlock_with_session_key(file: VaultFile, key: &[u8]) -> Result<Self> {
+        match file {
+            VaultFile::Current(f) => Self::from_v2(*f, Key::from_bytes(key)?, None),
+            VaultFile::Legacy(_) => Err(Error::UnsupportedFormat(1)),
+        }
+    }
+
     pub fn unlock_with_backup_code(file: VaultFile, code: &BackupCode) -> Result<Self> {
         Self::open_any(file, code.as_bytes(), SlotKind::Recovery, None)
     }

@@ -94,6 +94,25 @@ Inside the Flatpak the vault lives in `~/.var/app/io.github.n3amil.Vaulti/data/v
 Auto-locks after 5 min idle; copied passwords are cleared from the clipboard after 30 s.
 Shortcuts: Ctrl+F search, Ctrl+N new entry, Ctrl+C copy password, Ctrl+L lock.
 
+## Browser extension (Firefox, Chrome)
+
+The extension is its own Vaulti device: pair it like a phone (paste the pairing code from
+**Devices → Pair new device**), unlock with the master password, and it keeps an encrypted copy of
+the vault in extension storage and syncs P2P. The Rust core and sync run as WebAssembly; browsers
+can't open UDP sockets, so the extension always connects through iroh relays (which only see
+encrypted traffic). The popup lists logins for the current site, fills username + password, copies
+fields and shows TOTP codes. While unlocked, the vault key is kept in session-only memory
+(`storage.session`, never on disk) and dropped after 5 minutes of inactivity.
+
+```sh
+scripts/docker.sh extension        # → extension/dist/{firefox,chrome} + .zip files
+scripts/docker.sh extension-test   # pairs the CLI with the Chrome extension, fills a login (needs network)
+```
+
+Load it unpacked: Firefox `about:debugging` → This Firefox → Load Temporary Add-on → pick
+`extension/dist/firefox/manifest.json`; Chrome `chrome://extensions` → Developer mode → Load unpacked →
+`extension/dist/chrome`.
+
 ## CLI
 
 ```sh

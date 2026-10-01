@@ -93,6 +93,14 @@ impl SharedVault {
         Self { vault, saver: Saver::File(path) }
     }
 
+    /// Like [`Self::from_handle`], saving through a callback.
+    pub fn from_handle_with_saver(
+        vault: Arc<Mutex<Option<Vault>>>,
+        save: impl Fn(&vaulti_core::VaultFile) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        Self { vault, saver: Saver::Callback(Arc::new(save)) }
+    }
+
     pub fn with_saver(
         vault: Vault,
         save: impl Fn(&vaulti_core::VaultFile) -> Result<()> + Send + Sync + 'static,
