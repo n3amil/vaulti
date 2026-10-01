@@ -57,6 +57,11 @@ jobs:
         run: |
           npx tauri android init --ci
           npx tauri icon icon.png
+          # R8 shrinking breaks the barcode-scanner plugin (crash on scan; it ships
+          # no keep rules). The Rust lib stays optimized; this only skips Java/Kotlin shrinking.
+          G=src-tauri/gen/android/app/build.gradle.kts
+          grep -q 'isMinifyEnabled = true' "$G"
+          sed -i 's/isMinifyEnabled = true/isMinifyEnabled = false/' "$G"
 
       - name: Build APK (release, unsigned)
         working-directory: app
