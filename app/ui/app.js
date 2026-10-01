@@ -105,7 +105,6 @@ async function boot() {
   const s = await invoke('status');
   $('#vault-path').textContent = s.path;
   if (s.pending_join) showJoinStep('password');
-  else if (!s.exists && isMobile()) showJoinStep('ticket');
   else if (!s.exists) show('setup');
   else if (!s.unlocked) show('lock');
   else await enterMain();
@@ -164,14 +163,12 @@ $('#unlock-form').addEventListener('submit', async (e) => {
 
 const isMobile = () => state.platform === 'android' || state.platform === 'ios';
 
-// On phones you start from the desktop: setup is "scan the desktop's QR code".
+// On phones pairing means scanning the other device's QR code.
 function setupMobile() {
-  $('#join-title').dataset.i18n = 'Pair with your computer';
   $('#join-intro').dataset.i18n =
-    'Open Vaulti on your computer, go to **Devices → Pair new device** and scan the QR code. Both need to be online.';
+    'On your other device open **Devices → Pair new device** and scan the QR code shown there. Both devices need to be online.';
   translatePage($('#screen-join'));
   $('#scan-ticket').hidden = false;
-  $('#back-to-setup').hidden = true;
 
   // Lock when the app was in the background for more than a minute.
   let hiddenAt = 0;

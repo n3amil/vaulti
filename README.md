@@ -11,7 +11,7 @@ collections can be shared with other users and organisations.
 2. ✅ Device pairing (QR/ticket + confirmation code) + P2P sync via [iroh](https://iroh.computer), CRDT merge
 3. ✅ Tauri 2 desktop app (Linux .deb)
 4. ✅ Sharing collections with contacts (owner / editor / viewer)
-5. Android app (Tauri 2): pairs with the desktop via QR code
+5. Android app (Tauri 2): create a vault on the phone, or pair with another device via QR code
 6. Organisations: admin-signed membership log, roles
 7. Collection key rotation on member removal
 

@@ -18,9 +18,8 @@ const de = {
   'Add this device': 'Dieses Gerät hinzufügen',
   'On your other device open **Devices → Pair new device** and copy the pairing code here. Both devices need to be online.':
     'Öffne auf deinem anderen Gerät **Geräte → Neues Gerät koppeln** und kopiere den Kopplungscode hierher. Beide Geräte müssen online sein.',
-  'Pair with your computer': 'Mit deinem Computer koppeln',
-  'Open Vaulti on your computer, go to **Devices → Pair new device** and scan the QR code. Both need to be online.':
-    'Öffne Vaulti auf deinem Computer, gehe zu **Geräte → Neues Gerät koppeln** und scanne den QR-Code. Beide müssen online sein.',
+  'On your other device open **Devices → Pair new device** and scan the QR code shown there. Both devices need to be online.':
+    'Öffne auf deinem anderen Gerät **Geräte → Neues Gerät koppeln** und scanne den dort angezeigten QR-Code. Beide Geräte müssen online sein.',
   'Scan QR code': 'QR-Code scannen',
   'Pairing code': 'Kopplungscode',
   'Name for this device': 'Name für dieses Gerät',
@@ -207,8 +206,8 @@ const de = {
     'Geräte synchronisieren sich direkt miteinander, wann immer sie gleichzeitig online sind.',
   'Pair new device': 'Neues Gerät koppeln',
   'Pair a new device': 'Ein neues Gerät koppeln',
-  'On the new device install Vaulti and choose **I already use Vaulti on another device**, then paste this code. It works once and expires in 10 minutes.':
-    'Installiere Vaulti auf dem neuen Gerät, wähle **Ich nutze Vaulti schon auf einem anderen Gerät** und füge diesen Code ein. Er funktioniert einmal und läuft nach 10 Minuten ab.',
+  'On the new device install Vaulti, choose **I already use Vaulti on another device** and scan the QR code (or paste the code). It works once and expires in 10 minutes.':
+    'Installiere Vaulti auf dem neuen Gerät, wähle **Ich nutze Vaulti schon auf einem anderen Gerät** und scanne den QR-Code (oder füge den Code ein). Er funktioniert einmal und läuft nach 10 Minuten ab.',
   'Pairing QR code': 'Kopplungs-QR-Code',
   'Copy code': 'Code kopieren',
   'Waiting for the other device…': 'Warte auf das andere Gerät…',
