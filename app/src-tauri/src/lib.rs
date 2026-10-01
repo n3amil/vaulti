@@ -305,6 +305,8 @@ struct Profile {
     name: String,
     fingerprint: String,
     card: String,
+    /// The card as a QR code, for adding each other in person.
+    card_qr: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -743,10 +745,12 @@ fn copy_text(app: AppHandle, text: String) -> CmdResult<()> {
 #[tauri::command]
 fn profile(state: State<AppState>) -> CmdResult<Profile> {
     state.read(|v| {
+        let card = v.my_card().encode();
         Ok(Profile {
             name: v.profile_name().to_string(),
             fingerprint: v.identity_public().fingerprint(),
-            card: v.my_card().encode(),
+            card_qr: qr_svg(&card),
+            card,
         })
     })
 }
@@ -818,10 +822,15 @@ fn remove_device(state: State<AppState>, node_id: String) -> CmdResult<()> {
 #[tauri::command]
 async fn start_pairing(state: State<'_, AppState>) -> CmdResult<PairingTicket> {
     let ticket = node(&state).await?.start_pairing().await.map_err(err)?;
-    let qr_svg = qrcode::QrCode::with_error_correction_level(ticket.as_bytes(), qrcode::EcLevel::L)
-        .map(|q| q.render::<qrcode::render::svg::Color>().min_dimensions(260, 260).quiet_zone(true).build())
-        .unwrap_or_default();
+    let qr_svg = qr_svg(&ticket);
     Ok(PairingTicket { ticket, qr_svg })
+}
+
+/// Empty if the text is too long for a QR code; the UI then shows only the text.
+fn qr_svg(text: &str) -> String {
+    qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::L)
+        .map(|q| q.render::<qrcode::render::svg::Color>().min_dimensions(260, 260).quiet_zone(true).build())
+        .unwrap_or_default()
 }
 
 #[tauri::command]

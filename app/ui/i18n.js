@@ -229,14 +229,20 @@ const de = {
   'Paired "{name}"': '„{name}“ gekoppelt',
 
   // contacts
-  'People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.':
-    'Personen, mit denen du Sammlungen teilen kannst. Tauscht Kontaktkarten aus (z. B. per Chat oder E-Mail) und vergleicht dann die Fingerabdrücke am Telefon oder persönlich.',
-  'Your contact card': 'Deine Kontaktkarte',
   'Fingerprint:': 'Fingerabdruck:',
   'Copy my card': 'Meine Karte kopieren',
+  "People you can share collections with. The easiest way: meet up and scan each other's QR code.":
+    'Personen, mit denen du Sammlungen teilen kannst. Am einfachsten: Trefft euch und scannt gegenseitig eure QR-Codes.',
+  'Others see you as': 'Andere sehen dich als',
+  'Let them scan this code, or send them your card.': 'Lass diesen Code scannen oder schick deine Karte.',
+  'Details': 'Details',
+  'Scan their QR code': 'QR-Code der Person scannen',
+  'Or paste a contact card': 'Oder Kontaktkarte einfügen',
+  'Scanned in person, so this is really them.': 'Persönlich gescannt, also ist es wirklich diese Person.',
+  'Check with them that their app shows the same name under Contacts. For extra certainty, compare the fingerprint under Details.':
+    'Frag nach, ob ihre App unter Kontakte denselben Namen zeigt. Für mehr Sicherheit vergleicht den Fingerabdruck unter Details.',
+  "That QR code isn't a Vaulti contact card": 'Dieser QR-Code ist keine Vaulti-Kontaktkarte',
   'Add a contact': 'Kontakt hinzufügen',
-  'Check that this fingerprint matches what they see under Contacts → Your contact card.':
-    'Prüfe, ob dieser Fingerabdruck mit dem übereinstimmt, was die Person unter Kontakte → Deine Kontaktkarte sieht.',
   'Check card': 'Karte prüfen',
   'Add contact': 'Kontakt hinzufügen',
   'Contact added': 'Kontakt hinzugefügt',

@@ -2,6 +2,7 @@
 // textContent (never innerHTML) — this is a password manager.
 
 import { t, translateError, translatePage, setRich, lang, langPref, setLangPref, LANGUAGES } from './i18n.js';
+import { friendlyName } from './names.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -951,7 +952,7 @@ async function renderShareDialog() {
   $('[data-title]', shareDialog).textContent = t('Share "{name}"', { name: c.name });
   $('[data-members]', shareDialog).replaceChildren(
     ...c.members.map((m) => {
-      const who = h('div', { class: 'who' }, h('div', { text: m.is_me ? t('{name} (you)', { name: m.name }) : m.name }), h('div', { class: 'sub mono', text: m.fingerprint }));
+      const who = person(m.is_me ? t('{name} (you)', { name: m.name }) : m.name, m.fingerprint);
       if (m.role === 'owner') return h('li', {}, who, h('span', { class: 'muted small', text: t('Owner') }));
       const role = h('select', { onchange: (e) => share(m.user_id, e.target.value) },
         h('option', { value: 'editor', text: t('Can edit') }), h('option', { value: 'viewer', text: t('Can view') }));
@@ -962,7 +963,7 @@ async function renderShareDialog() {
   const members = new Set(c.members.map((m) => m.user_id));
   const contacts = await invoke('contacts');
   const candidates = contacts.filter((x) => !members.has(x.user_id));
-  shareAdd.elements.contact.replaceChildren(...candidates.map((x) => h('option', { value: x.user_id, text: `${x.name} (${x.fingerprint})` })));
+  shareAdd.elements.contact.replaceChildren(...candidates.map((x) => h('option', { value: x.user_id, text: `${x.name} · ${friendlyName(x.fingerprint)}` })));
   $('[data-has-contacts]', shareDialog).hidden = candidates.length === 0;
   $('[data-no-contacts]', shareDialog).hidden = candidates.length > 0;
   setRich(
@@ -1125,9 +1126,21 @@ devicesDialog.addEventListener('close', () => {
 const contactsDialog = $('#contacts-dialog');
 const contactForm = $('[data-add-contact]', contactsDialog);
 let myCard = '';
+let scannedCard = false;
+
+// A person as shown in lists: avatar, chosen name, friendly key name underneath.
+function person(name, fingerprint, ...extra) {
+  return h(
+    'div',
+    { class: 'who person' },
+    avatar(name),
+    h('div', {}, h('div', { text: name }), h('div', { class: 'sub', text: friendlyName(fingerprint) }), ...extra),
+  );
+}
 
 function resetContactForm() {
   contactForm.reset();
+  scannedCard = false;
   setError(contactForm, '');
   $('[data-preview]', contactForm).hidden = true;
   $('[data-submit]', contactForm).textContent = t('Check card');
@@ -1137,13 +1150,17 @@ async function renderContacts() {
   const me = await invoke('profile');
   myCard = me.card;
   $('[data-my-fp]', contactsDialog).textContent = me.fingerprint;
+  $('[data-my-friendly]', contactsDialog).textContent = friendlyName(me.fingerprint);
+  const qr = $('[data-my-qr]', contactsDialog);
+  qr.hidden = !me.card_qr;
+  if (me.card_qr) qr.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(me.card_qr);
   const list = await invoke('contacts');
   $('[data-contacts]', contactsDialog).replaceChildren(
     ...list.map((c) =>
       h(
         'li',
         {},
-        h('div', { class: 'who' }, h('div', { text: c.name }), h('div', { class: 'sub mono', text: c.fingerprint })),
+        person(c.name, c.fingerprint),
         h('button', {
           class: 'danger',
           text: t('Remove'),
@@ -1171,9 +1188,22 @@ $('#open-contacts').addEventListener('click', async () => {
 });
 
 contactForm.elements.card.addEventListener('input', () => {
+  scannedCard = false;
   $('[data-preview]', contactForm).hidden = true;
   $('[data-submit]', contactForm).textContent = t('Check card');
 });
+
+async function previewCard(card) {
+  const c = await invoke('preview_contact', { card });
+  $('[data-name]', contactForm).textContent = c.name;
+  $('[data-friendly]', contactForm).textContent = friendlyName(c.fingerprint);
+  $('[data-avatar]', contactForm).replaceChildren(avatar(c.name));
+  $('[data-fp]', contactForm).textContent = c.fingerprint;
+  $('[data-check-scanned]', contactForm).hidden = !scannedCard;
+  $('[data-check-pasted]', contactForm).hidden = scannedCard;
+  $('[data-preview]', contactForm).hidden = false;
+  $('[data-submit]', contactForm).textContent = t('Add contact');
+}
 
 contactForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1181,11 +1211,7 @@ contactForm.addEventListener('submit', async (e) => {
   setError(contactForm, '');
   try {
     if ($('[data-preview]', contactForm).hidden) {
-      const c = await invoke('preview_contact', { card });
-      $('[data-name]', contactForm).textContent = c.name;
-      $('[data-fp]', contactForm).textContent = c.fingerprint;
-      $('[data-preview]', contactForm).hidden = false;
-      $('[data-submit]', contactForm).textContent = t('Add contact');
+      await previewCard(card);
     } else {
       await invoke('add_contact', { card });
       resetContactForm();
@@ -1200,9 +1226,25 @@ contactForm.addEventListener('submit', async (e) => {
 contactsDialog.addEventListener('click', async (e) => {
   const action = e.target.dataset?.action;
   if (action === 'close') contactsDialog.close();
+  if (action === 'details') {
+    const d = $('[data-details]', contactsDialog);
+    d.hidden = !d.hidden;
+  }
   if (action === 'copy-card') {
     await invoke('copy_text', { text: myCard });
     toast(t('Contact card copied. Send it to the person you want to share with.'));
+  }
+  if (action === 'scan-card') {
+    setError(contactForm, '');
+    try {
+      const content = await scanQr();
+      if (!content?.startsWith('vaulti-contact:')) throw new Error(t("That QR code isn't a Vaulti contact card"));
+      contactForm.elements.card.value = content;
+      scannedCard = true;
+      await previewCard(content);
+    } catch (err) {
+      if (String(err) !== 'cancelled') setError(contactForm, err.message || String(err));
+    }
   }
 });
 

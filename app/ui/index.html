@@ -325,18 +325,31 @@
   <dialog id="contacts-dialog" class="wide">
     <div>
       <h2 data-i18n="Contacts">Contacts</h2>
-      <p class="muted" data-i18n="People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.">People you can share collections with. Exchange contact cards (e.g. by chat or email), then compare fingerprints by phone or in person.</p>
+      <p class="muted" data-i18n="People you can share collections with. The easiest way: meet up and scan each other's QR code.">People you can share collections with. The easiest way: meet up and scan each other's QR code.</p>
       <div class="my-card">
-        <h3 data-i18n="Your contact card">Your contact card</h3>
-        <p class="small"><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-my-fp></span></p>
-        <button data-action="copy-card" data-i18n="Copy my card">Copy my card</button>
+        <img data-my-qr alt="" class="qr">
+        <div class="my-card-text">
+          <p class="muted small" data-i18n="Others see you as">Others see you as</p>
+          <p class="friendly" data-my-friendly></p>
+          <p class="muted small" data-i18n="Let them scan this code, or send them your card.">Let them scan this code, or send them your card.</p>
+          <span class="row">
+            <button data-action="copy-card" data-i18n="Copy my card">Copy my card</button>
+            <button class="link" data-action="details" data-i18n="Details">Details</button>
+          </span>
+          <p class="muted small details" data-details hidden><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-my-fp></span></p>
+        </div>
       </div>
       <form data-add-contact>
         <h3 data-i18n="Add a contact">Add a contact</h3>
-        <textarea name="card" rows="3" class="mono" spellcheck="false" placeholder="vaulti-contact:…"></textarea>
+        <button type="button" class="primary scan phone-only" data-action="scan-card" data-i18n="Scan their QR code">Scan their QR code</button>
+        <label><span data-i18n="Or paste a contact card">Or paste a contact card</span>
+          <textarea name="card" rows="3" class="mono" spellcheck="false" placeholder="vaulti-contact:…"></textarea>
+        </label>
         <div class="contact-preview" data-preview hidden>
-          <p><b data-name></b><br><span class="small"><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-fp></span></span></p>
-          <p class="muted small" data-i18n="Check that this fingerprint matches what they see under Contacts → Your contact card.">Check that this fingerprint matches what they see under Contacts → Your contact card.</p>
+          <div class="person"><span data-avatar></span><div><b data-name></b><div class="friendly-sub" data-friendly></div></div></div>
+          <p class="muted small" data-check-scanned hidden data-i18n="Scanned in person, so this is really them.">Scanned in person, so this is really them.</p>
+          <p class="muted small" data-check-pasted data-i18n="Check with them that their app shows the same name under Contacts. For extra certainty, compare the fingerprint under Details.">Check with them that their app shows the same name under Contacts. For extra certainty, compare the fingerprint under Details.</p>
+          <p class="muted small details"><span data-i18n="Fingerprint:">Fingerprint:</span> <span class="mono" data-fp></span></p>
         </div>
         <p class="error" data-error></p>
         <span class="row"><button type="submit" class="primary" data-submit data-i18n="Check card">Check card</button></span>
