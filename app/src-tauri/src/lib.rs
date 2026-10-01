@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -101,6 +101,9 @@ fn check_new_password(pw: &str) -> CmdResult<()> {
 }
 
 fn hostname() -> String {
+    if cfg!(target_os = "android") {
+        return "Android".into();
+    }
     std::fs::read_to_string("/etc/hostname")
         .ok()
         .map(|h| h.trim().to_string())
@@ -766,23 +769,46 @@ fn sync_now(state: State<AppState>) {
     state.kick.notify_one();
 }
 
+/// "desktop" or "android"; the UI adapts setup and layout.
+#[tauri::command]
+fn platform() -> &'static str {
+    if cfg!(target_os = "android") {
+        "android"
+    } else {
+        "desktop"
+    }
+}
+
 #[tauri::command]
 fn sync_status(state: State<AppState>) -> CmdResult<SyncStatus> {
     Ok(state.status.lock().map_err(err)?.clone())
 }
 
+/// Desktop keeps the CLI-compatible location; Android uses the app's private storage.
+fn vault_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if cfg!(target_os = "android") {
+        return Ok(app.path().app_data_dir()?.join("vault.json"));
+    }
+    Ok(dirs::data_dir().ok_or("no data directory")?.join("vaulti/vault.json"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let path = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("vaulti/vault.json");
-    tauri::Builder::default()
-        .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(AppState {
-            path,
-            vault: Arc::new(Mutex::new(None)),
-            sync: tokio::sync::Mutex::new(None),
-            status: Arc::new(Mutex::new(SyncStatus::default())),
-            kick: Arc::new(Notify::new()),
-            pending_join: Mutex::new(None),
+    let builder = tauri::Builder::default().plugin(tauri_plugin_clipboard_manager::init());
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    builder
+        .setup(|app| {
+            let path = vault_path(app.handle())?;
+            app.manage(AppState {
+                path,
+                vault: Arc::new(Mutex::new(None)),
+                sync: tokio::sync::Mutex::new(None),
+                status: Arc::new(Mutex::new(SyncStatus::default())),
+                kick: Arc::new(Notify::new()),
+                pending_join: Mutex::new(None),
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             status,
@@ -822,6 +848,7 @@ pub fn run() {
             confirm_pairing,
             sync_now,
             sync_status,
+            platform,
         ])
         .run(tauri::generate_context!())
         .expect("error while running vaulti");

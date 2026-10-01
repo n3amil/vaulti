@@ -23,3 +23,5 @@ dirs = "6"
 zeroize = "1"
 tokio = { version = "1", features = ["sync", "time", "macros"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# Mobile-only (the crate is empty on desktop); scans the desktop's pairing QR code.
+tauri-plugin-barcode-scanner = "2"

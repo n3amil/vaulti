@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Vaulti</title>
   <link rel="stylesheet" href="style.css">
   <script type="module" src="app.js"></script>
@@ -26,9 +26,10 @@
   <!-- Join from another device -->
   <section id="screen-join" class="screen center" hidden>
     <form class="card" id="join-form">
-      <h1>Add this device</h1>
+      <h1 id="join-title">Add this device</h1>
       <div data-step="ticket">
-        <p class="muted">On your other device open <b>Devices → Pair new device</b> and copy the pairing code here. Both devices need to be online.</p>
+        <p class="muted" id="join-intro">On your other device open <b>Devices → Pair new device</b> and copy the pairing code here. Both devices need to be online.</p>
+        <button type="button" class="primary scan" id="scan-ticket" hidden>Scan QR code</button>
         <label>Pairing code <textarea name="ticket" rows="4" class="mono" spellcheck="false" placeholder="vaulti-pair:…" autofocus></textarea></label>
         <label>Name for this device <input name="device" autocomplete="off" placeholder="e.g. Work laptop"></label>
         <div class="join-code" data-join-code hidden>
@@ -84,9 +85,9 @@
   </section>
 
   <!-- Main -->
-  <section id="screen-main" class="screen main" hidden>
+  <section id="screen-main" class="screen main" data-view="list" hidden>
     <nav class="sidebar">
-      <div class="brand"><img src="logo.svg" alt=""> Vaulti</div>
+      <div class="brand"><img src="logo.svg" alt=""> Vaulti <button class="link mobile-only" id="close-nav">Done</button></div>
       <button class="nav-item" data-collection="">All items <span class="count" id="count-all"></span></button>
       <div class="nav-heading">Collections <button class="icon" id="new-collection" title="New collection">+</button></div>
       <div id="collection-list"></div>
@@ -100,6 +101,7 @@
 
     <div class="list-pane">
       <div class="list-header">
+        <button class="icon mobile-only" id="open-nav" aria-label="Collections and menu">☰</button>
         <input type="search" id="search" placeholder="Search" autocomplete="off" spellcheck="false">
         <button class="primary" id="new-entry">New</button>
       </div>

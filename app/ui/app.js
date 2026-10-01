@@ -15,7 +15,10 @@ const state = {
   query: '',
   unlocked: false,
   afterBackup: null,
+  platform: 'desktop',
 };
+
+const isPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
 // --- helpers -----------------------------------------------------------------
 
@@ -92,9 +95,13 @@ function timeAgo(secs) {
 // --- auth flows ----------------------------------------------------------------
 
 async function boot() {
+  state.platform = await invoke('platform');
+  document.documentElement.dataset.platform = state.platform;
+  if (state.platform === 'android') setupAndroid();
   const s = await invoke('status');
   $('#vault-path').textContent = s.path;
   if (s.pending_join) showJoinStep('password');
+  else if (!s.exists && state.platform === 'android') showJoinStep('ticket');
   else if (!s.exists) show('setup');
   else if (!s.unlocked) show('lock');
   else await enterMain();
@@ -147,6 +154,69 @@ $('#unlock-form').addEventListener('submit', async (e) => {
     }
   });
 });
+
+// --- Android ------------------------------------------------------------------------------
+
+// On Android you start from the desktop: setup is "scan the desktop's QR code".
+function setupAndroid() {
+  $('#join-title').textContent = 'Pair with your computer';
+  $('#join-intro').textContent =
+    'Open Vaulti on your computer, go to Devices → Pair new device and scan the QR code. Both need to be online.';
+  $('#scan-ticket').hidden = false;
+  $('#back-to-setup').hidden = true;
+
+  // Lock when the app was in the background for more than a minute.
+  let hiddenAt = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (state.unlocked && hiddenAt && Date.now() - hiddenAt > 60_000) lock();
+  });
+}
+
+async function scanQr() {
+  const scanner = window.__TAURI__.barcodeScanner;
+  if (scanner) {
+    if ((await scanner.checkPermissions()) !== 'granted' && (await scanner.requestPermissions()) !== 'granted') {
+      throw new Error('Camera permission is needed to scan the code. You can paste it instead.');
+    }
+    return (await scanner.scan({ windowed: false, formats: ['QR_CODE'] })).content;
+  }
+  return (await invoke('plugin:barcode-scanner|scan', { windowed: false, formats: ['QR_CODE'] })).content;
+}
+
+$('#scan-ticket').addEventListener('click', async () => {
+  setError(joinForm, '');
+  try {
+    const content = await scanQr();
+    if (!content?.startsWith('vaulti-pair:')) throw new Error("That QR code isn't a Vaulti pairing code");
+    joinForm.elements.ticket.value = content;
+    if (!joinForm.elements.device.value) joinForm.elements.device.value = 'Android';
+    joinForm.requestSubmit();
+  } catch (err) {
+    if (String(err) !== 'cancelled') setError(joinForm, err.message || String(err));
+  }
+});
+
+// --- phone navigation: one pane at a time, Android back button goes back ---------------------
+
+function setView(view) {
+  const main = $('#screen-main');
+  if (!isPhone() || main.dataset.view === view) return;
+  if (view !== 'list') history.pushState({ view }, '');
+  main.dataset.view = view;
+}
+
+window.addEventListener('popstate', () => {
+  $('#screen-main').dataset.view = 'list';
+});
+
+function backToList() {
+  if (history.state?.view) history.back();
+  else $('#screen-main').dataset.view = 'list';
+}
+
+$('#open-nav').addEventListener('click', () => setView('nav'));
+$('#close-nav').addEventListener('click', backToList);
 
 // --- join from another device ---------------------------------------------------------
 
@@ -229,6 +299,7 @@ async function lock() {
   $('#detail').replaceChildren(h('p', { class: 'muted empty', text: 'Select an entry' }));
   $('#search').value = '';
   renderSyncStatus(null);
+  $('#screen-main').dataset.view = 'list';
   show('lock');
 }
 
@@ -327,6 +398,7 @@ function selectCollection(id) {
   state.collection = id;
   renderSidebar();
   renderList();
+  if ($('#screen-main').dataset.view === 'nav') backToList();
 }
 $('[data-collection=""]').addEventListener('click', () => selectCollection(null));
 
@@ -339,6 +411,7 @@ async function selectEntry(id) {
   state.entry = id;
   renderList();
   await renderDetail();
+  setView('detail');
 }
 
 function clearDetail() {
@@ -381,6 +454,7 @@ async function renderDetail() {
 
   const writable = canWrite(collectionById(e.collection_id));
   $('#detail').replaceChildren(
+    h('button', { class: 'link mobile-only back', text: '‹ Back', onclick: backToList }),
     h('div', { class: 'detail-head' }, avatar(e.title), h('div', {}, h('h2', { text: e.title }), h('div', { class: 'muted', text: collectionName(e.collection_id) }))),
     ...fields,
     writable
@@ -400,6 +474,7 @@ async function deleteEntry(e) {
   try {
     await invoke('delete_entry', { id: e.id });
     state.entry = null;
+    if ($('#screen-main').dataset.view === 'detail') backToList();
     await refresh();
     toast('Entry deleted');
   } catch (err) {
