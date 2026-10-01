@@ -196,7 +196,7 @@ $('#search').addEventListener('input', () => {
 function row(e, forThisPage) {
   const actions = h('div', { class: 'actions' });
   if (forThisPage) actions.append(h('button', { class: 'primary', text: t('Fill'), onclick: () => fill(e) }));
-  if (e.username) actions.append(h('button', { text: t('Username'), onclick: () => copy(secret(e).username, t('Username')) }));
+  if (e.username) actions.append(h('button', { text: t('Username'), onclick: () => copy(secret(e).username, t('Username'), false) }));
   actions.append(h('button', { text: t('Password'), onclick: () => copy(secret(e).password, t('Password')) }));
   if (e.has_totp) {
     const code = h('button', { class: 'totp', text: '··· ···', onclick: () => copy(JSON.parse(device.totp(e.id)).code, t('Code')) });
@@ -220,9 +220,10 @@ function row(e, forThisPage) {
 
 const secret = (e) => JSON.parse(device.secret(e.id));
 
-async function copy(value, label) {
+async function copy(value, label, sensitive = true) {
   await navigator.clipboard.writeText(value);
-  toast(t('{label} copied', { label }));
+  toast(sensitive ? t('{label} copied, clears in 30 s', { label }) : t('{label} copied', { label }));
+  if (sensitive) chrome.runtime.sendMessage('copied-secret').catch(() => {});
   touch();
 }
 

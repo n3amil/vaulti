@@ -16,7 +16,11 @@ const variants = {
     background: { scripts: ['background.js'], type: 'module' },
     browser_specific_settings: { gecko: { id: 'vaulti@n3amil.github.io', strict_min_version: '128.0' } },
   },
-  chrome: { background: { service_worker: 'background.js', type: 'module' } },
+  // Chrome's service worker needs an offscreen page to touch the clipboard.
+  chrome: {
+    background: { service_worker: 'background.js', type: 'module' },
+    permissions: [...manifest.permissions, 'offscreen'],
+  },
 };
 
 for (const [name, extra] of Object.entries(variants)) {

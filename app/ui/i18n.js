@@ -180,6 +180,7 @@ const de = {
   'Logins for {site}': 'Logins für {site}',
   'No logins for this site. Search to find others.': 'Keine Logins für diese Seite. Suche, um andere zu finden.',
   'Fill': 'Ausfüllen',
+  '{label} copied, clears in 30 s': '{label} kopiert, wird in 30 s gelöscht',
   'Code': 'Code',
   'No login form found on this page': 'Auf dieser Seite wurde kein Anmeldeformular gefunden',
   'Synced with {n} devices': 'Mit {n} Geräten synchronisiert',

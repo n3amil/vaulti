@@ -11,9 +11,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 IMAGE=vaulti-build-linux
-docker build -q -t "$IMAGE" -f docker/linux.Dockerfile docker >/dev/null
 
 run() {
+    docker build -q -t "$IMAGE" -f docker/linux.Dockerfile docker >/dev/null
     local tty=()
     [ -t 0 ] && tty=(-it)
     docker run --rm "${tty[@]}" \

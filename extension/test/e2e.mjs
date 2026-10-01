@@ -60,4 +60,14 @@ await again.addInitScript(() => { const q = chrome.tabs.query.bind(chrome.tabs);
 await again.goto(`chrome-extension://${extId}/popup.html`);
 await again.waitForTimeout(1500);
 const screen = await again.$eval('section:not([hidden])', (s) => s.id); console.log('reopened screen:', screen); if (screen !== 'screen-main') fail('session unlock');
+// Copied passwords are cleared after 30 s (background alarm; offscreen page in Chrome).
+await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://localhost:8097' });
+const before = await again.evaluate(async () => { const b = [...document.querySelectorAll('#entries li button')].find((x) => /Password|Passwort/.test(x.textContent)); b.click(); await new Promise((r) => setTimeout(r, 300)); return true; });
+const readClip = () => site.evaluate(() => navigator.clipboard.readText());
+await site.bringToFront();
+const copied = await readClip();
+console.log('copied length:', copied.length); if (copied.length < 10) fail('copy password');
+await site.waitForTimeout(35000);
+const after = await readClip();
+console.log('after 35 s:', JSON.stringify(after)); if (after.trim() !== '') fail('clipboard not cleared');
 host.kill(); await ctx.close(); console.log(process.exitCode ? 'extension-test: FAILED' : 'extension-test: ok'); process.exit(process.exitCode ?? 0);
