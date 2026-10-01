@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["core", "cli"]
+members = ["core", "cli", "app/src-tauri"]
+# Host builds skip the app (needs WebKitGTK); build it via scripts/docker.sh.
+default-members = ["core", "cli"]
 
 [workspace.package]
 version = "0.1.0"

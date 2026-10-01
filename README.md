@@ -3,13 +3,13 @@
 Peer-to-peer password manager. No central server: devices sync directly,
 collections can be shared with other users and organisations.
 
-**Status:** phase 1 (local vault + CLI). Not audited — don't store real secrets yet.
+**Status:** local vault, CLI and Linux desktop app. No sync yet. Not audited — don't store real secrets yet.
 
 ## Roadmap (MVP: Linux desktop + Android)
 
 1. ✅ Core vault, crypto, recovery, CLI
 2. Device pairing (QR) + P2P sync via [iroh](https://iroh.computer), CRDT merge
-3. Tauri 2 desktop UI (Linux)
+3. ✅ Tauri 2 desktop app (Linux .deb)
 4. Android build (Tauri 2)
 5. Sharing collections with other users
 6. Organisations: admin-signed membership log, roles
@@ -28,6 +28,19 @@ root key ─wraps─▶ collection key ─encrypts─▶ collection (name + entr
 - Changing the master password or the backup code only rewraps the root key.
 - Recovery: backup code → set new master password → new backup code issued, old one invalid.
 - Losing **both** master password and backup code means the data is gone.
+
+## Desktop app (Linux)
+
+Built in Docker, nothing needed on the host except Docker:
+
+```sh
+scripts/docker.sh deb            # -> dist/Vaulti_<version>_amd64.deb
+sudo apt install ./dist/Vaulti_0.1.0_amd64.deb
+```
+
+Runtime deps: `libwebkit2gtk-4.1-0`, `libgtk-3-0`. Uses the same vault file as the CLI.
+Auto-locks after 5 min idle; copied passwords are cleared from the clipboard after 30 s.
+Shortcuts: Ctrl+F search, Ctrl+N new entry, Ctrl+C copy password, Ctrl+L lock.
 
 ## CLI
 
@@ -50,7 +63,9 @@ debug builds also honour `VAULTI_INSECURE_KDF=1`.
 ## Development
 
 ```sh
-cargo test
-cargo clippy --all-targets
-cargo fmt
+scripts/docker.sh check   # fmt + clippy + tests for the whole workspace (incl. app)
+scripts/docker.sh shell   # shell in the build container
+cargo test                # host: core + cli only (app needs WebKitGTK, build it in Docker)
 ```
+
+Layout: `core/` vault + crypto, `cli/` dev CLI, `app/` Tauri app (`ui/` plain HTML/JS, `src-tauri/` Rust commands).

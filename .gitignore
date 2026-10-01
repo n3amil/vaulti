@@ -1,2 +1,5 @@
 /target
 *.vault.json
+/dist
+node_modules/
+/app/src-tauri/gen
