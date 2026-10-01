@@ -269,14 +269,18 @@ button.scan { width: 100%; margin: 12px 0 4px; padding: 12px; font-size: 16px; }
   input, select, textarea, button { font-size: 16px; } /* no zoom on focus */
   button { padding: 9px 14px; }
 
-  .main { display: block; height: 100%; }
+  /* Android 15+ and iOS draw edge-to-edge: keep content clear of the status and navigation bars. */
+  .main {
+    display: block; height: 100%; box-sizing: border-box;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
   .main > * { height: 100%; }
   .main .sidebar, .main .detail-pane { display: none; }
   .main[data-view="nav"] .list-pane, .main[data-view="detail"] .list-pane { display: none; }
   .main[data-view="nav"] .sidebar { display: flex; }
   .main[data-view="detail"] .detail-pane { display: block; }
 
-  .sidebar { border-right: none; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+  .sidebar { border-right: none; padding: 12px; }
   .brand { justify-content: space-between; }
   .brand .link { margin-left: auto; }
   .nav-item { padding: 12px; }
@@ -287,13 +291,14 @@ button.scan { width: 100%; margin: 12px 0 4px; padding: 12px; font-size: 16px; }
   .detail-pane { padding: 16px; }
   .detail-pane > .back { margin-bottom: 12px; }
 
-  dialog { width: calc(100vw - 16px); max-height: calc(100vh - 32px); overflow-y: auto; padding: 18px; }
+  dialog { width: calc(100vw - 16px); max-height: calc(100vh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; padding: 18px; }
   dialog.wide { width: calc(100vw - 16px); }
   .pairing-body { flex-direction: column; align-items: center; }
   .pairing-code { width: 100%; }
   .member-list li, .device-list li, .contact-list li { flex-wrap: wrap; }
   .card { padding: 22px; border: none; background: transparent; }
-  .center { align-items: flex-start; padding-top: max(24px, env(safe-area-inset-top)); }
+  .center { align-items: flex-start; padding-top: max(24px, env(safe-area-inset-top)); padding-bottom: env(safe-area-inset-bottom); }
+  .toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
 }
 
 /* --- generator, TOTP, backup --- */
