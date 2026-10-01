@@ -1,12 +1,11 @@
 name: Android
 
 # Builds an installable (debug-signed) APK for arm64 phones.
-# Run manually, or it runs for release tags. The Android project
+# Run manually; release.yml calls it for version tags. The Android project
 # (app/src-tauri/gen/android) is generated fresh by `tauri android init`.
 on:
   workflow_dispatch:
-  push:
-    tags: ['v*']
+  workflow_call:
 
 jobs:
   apk:
@@ -33,17 +32,20 @@ jobs:
         with:
           key: android
 
-      - run: npm install -g @tauri-apps/cli@2.12.1
+      # Project-local CLI: the generated Gradle project calls it back via npm.
+      - name: Tauri CLI
+        working-directory: app
+        run: npm install
 
       - name: Generate Android project
         working-directory: app
         run: |
-          tauri android init --ci
-          tauri icon icon.png
+          npx tauri android init --ci
+          npx tauri icon icon.png
 
       - name: Build APK
         working-directory: app
-        run: tauri android build --ci --debug --apk --target aarch64
+        run: npx tauri android build --ci --debug --apk --target aarch64
 
       - run: |
           mkdir -p out

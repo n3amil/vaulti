@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v0.1.0 to build the .deb and .flatpak and publish a
-# (draft) GitHub release. Run manually to just get the artifacts.
+# Push a tag like v0.1.0 to build the .deb, .flatpak and Android APK and
+# publish a GitHub release. Tags with a suffix (v0.1.0-alpha.1) become
+# pre-releases. Run manually to just get the artifacts.
 on:
   push:
     tags: ['v*']
@@ -40,9 +41,12 @@ jobs:
           cache-key: flatpak-builder-${{ github.sha }}
           upload-artifact: true
 
+  android:
+    uses: ./.github/workflows/android.yml
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, flatpak]
+    needs: [deb, flatpak, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -54,9 +58,25 @@ jobs:
           mkdir out
           cp artifacts/deb/*.deb out/
           find artifacts -name '*.flatpak' -exec cp {} out/ \;
+          cp artifacts/android-apk/*.apk out/
           ls -lh out
       - uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: out/*
           generate_release_notes: true
+          body: |
+            > **Early test build.** Not audited. Don't store real secrets yet.
+
+            ### Install
+            - **Linux (Debian/Ubuntu):** `sudo apt install ./Vaulti_*_amd64.deb`
+            - **Linux (Flatpak):** `flatpak install --user Vaulti.flatpak`
+              (needs the GNOME 49 runtime from Flathub: `flatpak install flathub org.gnome.Platform//49`)
+            - **Android (arm64):** download `Vaulti-android-arm64-debug.apk` on the phone and open it
+              (allow installing from your browser). Debug-signed: to update, uninstall the old version first.
+
+            ### Get started
+            1. Create your vault on the computer. Write down the backup code.
+            2. On the computer: **Devices → Pair new device**. On the phone: **Scan QR code**.
+            3. Check that both show the same 6-digit code and confirm on the computer.
+            4. Unlock on the phone with your master password. Both sync whenever they're online together.
