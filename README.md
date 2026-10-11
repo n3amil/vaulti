@@ -3,6 +3,8 @@
 Peer-to-peer password manager. No central server: devices sync directly,
 collections can be shared with other users and organisations.
 
+> **Disclaimer:** This project was written by [Claude](https://claude.ai), Anthropic's AI model (via Claude Code), under human direction. Review the code accordingly.
+
 **Status:** Linux desktop app + CLI with P2P device sync and collection sharing. Android next. Not audited — don't store real secrets yet.
 
 ## Roadmap (MVP: Linux desktop + Android)
